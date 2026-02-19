@@ -102,7 +102,7 @@ class GraylogClient:
 
             # Handle authentication errors specifically
             if response.status_code == 401:
-                logger.error("Authentication failed - check your username and password")
+                logger.error("Authentication failed - check your token or username/password")
                 logger.error(f"Response text: {response.text}")
                 raise requests.exceptions.HTTPError(
                     f"Authentication failed (401): {response.text}"

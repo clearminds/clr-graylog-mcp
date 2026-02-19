@@ -3,10 +3,9 @@
 import json
 import logging
 import os
+import sys
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
 from fastmcp import FastMCP
 from pydantic import BaseModel, Field, validator
 
@@ -19,9 +18,6 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
-
-# Initialize FastAPI application
-app = FastAPI(title="MCP Graylog Server", version="1.0.0")
 
 # Initialize FastMCP server
 mcp_server = FastMCP("graylog")
@@ -235,47 +231,6 @@ class StreamSearchRequest(BaseModel):
             raise ValueError(
                 f"Invalid time range format: {v}. Use relative (e.g., '1h') or ISO 8601 format"
             )
-
-
-# Health check endpoint
-@app.get("/health_check")
-async def health_check():
-    """Basic health check endpoint."""
-    try:
-        is_connected = graylog_client.test_connection()
-
-        health_status = {
-            "status": "healthy" if is_connected else "unhealthy",
-            "graylog_connected": is_connected,
-            "graylog_endpoint": config.graylog.endpoint,
-            "server_config": {"host": config.server.host, "port": config.server.port},
-        }
-
-        return JSONResponse(content=health_status)
-
-    except Exception as e:
-        logger.error(f"Health check failed: {e}")
-        return JSONResponse(
-            status_code=500,
-            content={
-                "status": "unhealthy",
-                "error": str(e),
-                "graylog_connected": False,
-            },
-        )
-
-
-@app.get("/")
-async def root():
-    """Root endpoint with server information."""
-    return {
-        "name": "MCP Graylog Server",
-        "version": "1.0.0",
-        "endpoints": {
-            "health_check": "/health_check",
-            "mcp_server": "Available via MCP protocol",
-        },
-    }
 
 
 @mcp_server.tool()
@@ -769,19 +724,38 @@ def get_last_event_from_stream(stream_id: str, time_range: str = "1h") -> str:
         return json.dumps({"error": str(e)}, indent=2)
 
 
-if __name__ == "__main__":
-    import uvicorn
+def main() -> None:
+    """Entry point for the MCP server."""
+    import argparse
 
-    logger.info(
-        f"Starting MCP Graylog server on {config.server.host}:{config.server.port}"
+    parser = argparse.ArgumentParser(description="Graylog MCP Server")
+    parser.add_argument(
+        "--transport", choices=["stdio", "sse"], default="stdio",
     )
+    parser.add_argument(
+        "--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+    )
+    args = parser.parse_args()
+
+    logging.basicConfig(
+        level=getattr(logging, args.log_level),
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        stream=sys.stderr,
+    )
+
+    if not config.has_auth():
+        logger.error(
+            "No authentication configured. Set GRAYLOG_TOKEN or "
+            "GRAYLOG_USERNAME/GRAYLOG_PASSWORD env vars, "
+            f"or create {config.graylog.__class__.__name__} at ~/.config/graylog/credentials.json"
+        )
+        sys.exit(1)
+
     logger.info(f"Graylog endpoint: {config.graylog.endpoint}")
+    logger.info(f"Auth method: {'token' if config.graylog.token else 'username/password'}")
 
-    # Test connection on startup
-    if graylog_client.test_connection():
-        logger.info("Successfully connected to Graylog")
-    else:
-        logger.warning("Failed to connect to Graylog - check configuration")
+    mcp_server.run(transport=args.transport)
 
-    # Run the FastMCP server over stdio (for MCP protocol)
-    mcp_server.run()
+
+if __name__ == "__main__":
+    main()
