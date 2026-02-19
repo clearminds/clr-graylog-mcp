@@ -62,8 +62,6 @@ class Config:
         try:
             file_creds: dict[str, Any] = json.loads(CREDS_PATH.read_text())
 
-            if "url" in file_creds:
-                self.graylog.endpoint = file_creds["url"]
             if "endpoint" in file_creds:
                 self.graylog.endpoint = file_creds["endpoint"]
             if "token" in file_creds:
