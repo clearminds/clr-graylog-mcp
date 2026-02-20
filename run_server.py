@@ -6,6 +6,8 @@ This script provides a simple way to run the MCP Graylog server.
 It handles environment setup and provides helpful error messages.
 """
 
+from __future__ import annotations
+
 import os
 import sys
 import logging
@@ -16,16 +18,20 @@ project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
 
-def setup_logging():
-    """Setup logging configuration."""
+def setup_logging() -> None:
+    """Configure logging with default INFO level."""
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
 
 
-def check_environment():
-    """Check if required environment variables are set."""
+def check_environment() -> bool:
+    """Check if required environment variables are set.
+
+    Returns:
+        True if all required variables are present, False otherwise.
+    """
     required_vars = ["GRAYLOG_ENDPOINT", "GRAYLOG_USERNAME", "GRAYLOG_PASSWORD"]
     missing_vars = []
 
@@ -44,8 +50,12 @@ def check_environment():
     return True
 
 
-def main():
-    """Main entry point."""
+def main() -> int | None:
+    """Run the MCP Graylog server.
+
+    Returns:
+        Exit code (1 on failure, None on success).
+    """
     setup_logging()
 
     # Check environment

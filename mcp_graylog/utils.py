@@ -1,11 +1,13 @@
 """Utility functions for MCP Graylog server."""
 
+from __future__ import annotations
+
 import re
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Union, Any
+from typing import Any
 
 
-def parse_time_range(time_range: str) -> Dict[str, Union[str, datetime]]:
+def parse_time_range(time_range: str) -> dict[str, str | datetime]:
     """
     Parse time range string into start and end times.
 
@@ -40,7 +42,7 @@ def parse_time_range(time_range: str) -> Dict[str, Union[str, datetime]]:
     return {"from": from_time, "to": now}
 
 
-def build_elasticsearch_query(base_query: str, filters: Dict[str, str]) -> str:
+def build_elasticsearch_query(base_query: str, filters: dict[str, str]) -> str:
     """
     Build Elasticsearch query with filters.
 
@@ -68,7 +70,7 @@ def build_elasticsearch_query(base_query: str, filters: Dict[str, str]) -> str:
         return f"({base_query}) AND ({' AND '.join(filter_conditions)})"
 
 
-def extract_log_level(message: str) -> Optional[str]:
+def extract_log_level(message: str) -> str | None:
     """
     Extract log level from log message.
 
@@ -93,7 +95,7 @@ def extract_log_level(message: str) -> Optional[str]:
     return None
 
 
-def format_log_entry(log_entry: Dict[str, Any]) -> Dict[str, Any]:
+def format_log_entry(log_entry: dict[str, Any]) -> dict[str, Any]:
     """
     Format log entry for consistent output.
 
@@ -145,7 +147,7 @@ def validate_query_syntax(query: str) -> bool:
     return True
 
 
-def get_common_log_fields() -> List[str]:
+def get_common_log_fields() -> list[str]:
     """
     Get list of common log fields.
 
@@ -166,7 +168,7 @@ def get_common_log_fields() -> List[str]:
     ]
 
 
-def parse_graylog_response(response: Dict[str, Any]) -> Dict[str, Any]:
+def parse_graylog_response(response: dict[str, Any]) -> dict[str, Any]:
     """
     Parse and format Graylog API response.
 

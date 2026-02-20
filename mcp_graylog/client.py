@@ -1,9 +1,11 @@
 """Graylog API client for MCP server."""
 
+from __future__ import annotations
+
 import json
 import logging
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 from urllib.parse import urljoin
 
 import requests
@@ -15,51 +17,87 @@ logger = logging.getLogger(__name__)
 
 
 class TimeRange(BaseModel):
-    """Time range for log queries."""
+    """Time range for log queries.
+
+    Attributes:
+        type: Time range type (relative, absolute).
+        from_: Start time (aliased as "from" in serialization).
+        to: End time.
+    """
 
     type: str = Field(..., description="Time range type (relative, absolute)")
-    from_: Optional[str] = Field(None, alias="from", description="Start time")
-    to: Optional[str] = Field(None, description="End time")
+    from_: str | None = Field(None, alias="from", description="Start time")
+    to: str | None = Field(None, description="End time")
 
 
 class QueryParams(BaseModel):
-    """Query parameters for log search."""
+    """Query parameters for log search.
+
+    Attributes:
+        query: Elasticsearch-syntax search query.
+        time_range: Relative or absolute time range string.
+        fields: Specific fields to return in results.
+        limit: Maximum number of results to return.
+        offset: Pagination offset for results.
+        sort: Field name to sort results by.
+        sort_direction: Sort order, either "asc" or "desc".
+        stream_id: Restrict search to a specific stream.
+        decorate: Whether to decorate messages with additional metadata.
+        filter: Additional filter query appended to the search.
+        highlight: Enable or disable result highlighting.
+    """
 
     query: str = Field(..., description="Search query")
-    time_range: Optional[str] = Field(
+    time_range: str | None = Field(
         "1h",
         description="Time range (e.g., '1h', '24h', '7d'). Defaults to '1h' if not specified.",
     )
-    fields: Optional[List[str]] = Field(None, description="Fields to return")
+    fields: list[str] | None = Field(None, description="Fields to return")
     limit: int = Field(50, description="Maximum number of results")
     offset: int = Field(0, description="Result offset")
-    sort: Optional[str] = Field(None, description="Sort field")
+    sort: str | None = Field(None, description="Sort field")
     sort_direction: str = Field("desc", description="Sort direction")
-    stream_id: Optional[str] = Field(None, description="Stream ID to search in")
-    decorate: Optional[bool] = Field(
+    stream_id: str | None = Field(None, description="Stream ID to search in")
+    decorate: bool | None = Field(
         None, description="Whether to decorate messages (default: true)"
     )
-    filter: Optional[str] = Field(None, description="Additional filter query")
-    highlight: Optional[bool] = Field(
+    filter: str | None = Field(None, description="Additional filter query")
+    highlight: bool | None = Field(
         None, description="Enable/disable result highlighting"
     )
 
 
 class AggregationParams(BaseModel):
-    """Aggregation parameters for log analysis."""
+    """Aggregation parameters for log analysis.
+
+    Attributes:
+        type: Aggregation type such as "terms", "date_histogram", or "stats".
+        field: Field name to aggregate on.
+        size: Number of aggregation buckets to return.
+        interval: Time interval for date histogram aggregations.
+    """
 
     type: str = Field(..., description="Aggregation type (terms, date_histogram, etc.)")
     field: str = Field(..., description="Field to aggregate on")
     size: int = Field(10, description="Number of buckets")
-    interval: Optional[str] = Field(
+    interval: str | None = Field(
         None, description="Time interval for date histograms"
     )
 
 
 class GraylogClient:
-    """Client for interacting with Graylog API."""
+    """Client for interacting with the Graylog REST API.
 
-    def __init__(self):
+    Handles authentication, request construction, and response parsing for
+    all supported Graylog API endpoints including search, streams, and system info.
+
+    Attributes:
+        base_url: The base URL of the Graylog server (without trailing slash).
+        session: Pre-configured requests session with auth and content headers.
+        timeout: Request timeout in seconds.
+    """
+
+    def __init__(self) -> None:
         self.base_url = config.graylog.endpoint.rstrip("/")
         self.session = requests.Session()
 
@@ -79,10 +117,24 @@ class GraylogClient:
         self,
         method: str,
         endpoint: str,
-        params: Optional[Dict] = None,
-        data: Optional[Dict] = None,
-    ) -> Dict[str, Any]:
-        """Make HTTP request to Graylog API."""
+        params: dict[str, Any] | None = None,
+        data: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Make an HTTP request to the Graylog API.
+
+        Args:
+            method: HTTP method (GET, POST, PUT, DELETE).
+            endpoint: API endpoint path (e.g., "/api/streams").
+            params: Query parameters to include in the request URL.
+            data: JSON body data to send with the request.
+
+        Returns:
+            Parsed JSON response as a dictionary.
+
+        Raises:
+            requests.exceptions.HTTPError: If the server returns an error status.
+            requests.exceptions.RequestException: If the request fails.
+        """
         url = urljoin(self.base_url, endpoint)
 
         try:
@@ -117,12 +169,19 @@ class GraylogClient:
                 logger.error(f"Response text: {e.response.text}")
             raise
 
-    def _parse_time_range(self, time_range: str) -> Dict[str, Any]:
-        """
-        Parse time range string into Graylog format.
+    def _parse_time_range(self, time_range: str) -> dict[str, Any]:
+        """Parse a time range string into Graylog API format.
 
-        Graylog API expects relative time ranges in seconds for the /relative endpoint.
-        For absolute time ranges, it expects ISO 8601 format.
+        Graylog API expects relative time ranges in seconds for the /relative
+        endpoint.  For absolute time ranges, it expects ISO 8601 format.
+
+        Args:
+            time_range: Relative time string (e.g., "1h", "7d") or ISO 8601 timestamp.
+
+        Returns:
+            Dictionary with a "range" key containing seconds (int) for relative
+            ranges, or the original string for absolute/unrecognized formats.
+            Returns an empty dict when the input is falsy.
         """
         if not time_range:
             return {}
@@ -148,7 +207,7 @@ class GraylogClient:
             logger.warning(f"Unrecognized time range format: {time_range}")
             return {"range": time_range}
 
-    def search_logs(self, params: QueryParams) -> Dict[str, Any]:
+    def search_logs(self, params: QueryParams) -> dict[str, Any]:
         """
         Search logs using Graylog API.
 
@@ -226,7 +285,7 @@ class GraylogClient:
 
     def get_log_statistics(
         self, query: str, time_range: str, aggregation: AggregationParams
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Get log statistics and aggregations.
 
@@ -289,7 +348,7 @@ class GraylogClient:
         endpoint = f"/api/search/universal/relative/{aggregation.type}"
         return self._make_request("POST", endpoint, data=request_body)
 
-    def list_streams(self) -> List[Dict[str, Any]]:
+    def list_streams(self) -> list[dict[str, Any]]:
         """
         List all available streams.
 
@@ -318,7 +377,7 @@ class GraylogClient:
         response = self._make_request("GET", "/api/streams")
         return response.get("streams", [])
 
-    def get_stream_info(self, stream_id: str) -> Dict[str, Any]:
+    def get_stream_info(self, stream_id: str) -> dict[str, Any]:
         """
         Get detailed information about a stream.
 
@@ -349,7 +408,7 @@ class GraylogClient:
             raise ValueError("Stream ID is required")
         return self._make_request("GET", f"/api/streams/{stream_id}")
 
-    def search_stream_logs(self, stream_id: str, params: QueryParams) -> Dict[str, Any]:
+    def search_stream_logs(self, stream_id: str, params: QueryParams) -> dict[str, Any]:
         """
         Search logs within a specific stream.
 
@@ -396,7 +455,7 @@ class GraylogClient:
         logger.debug(f"Searching stream {stream_id} with query: {params.query}")
         return self.search_logs(params)
 
-    def get_system_info(self) -> Dict[str, Any]:
+    def get_system_info(self) -> dict[str, Any]:
         """
         Get Graylog system information.
 

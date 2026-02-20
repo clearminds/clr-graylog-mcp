@@ -13,8 +13,12 @@ import json
 from pathlib import Path
 
 
-def check_environment_variables():
-    """Check if required environment variables are set."""
+def check_environment_variables() -> bool:
+    """Check if required environment variables are set.
+
+    Returns:
+        True if all required variables are present, False otherwise.
+    """
     print("Checking environment variables...")
 
     required_vars = {
@@ -41,8 +45,12 @@ def check_environment_variables():
     return True
 
 
-def check_docker_image():
-    """Check if the Docker image exists."""
+def check_docker_image() -> bool:
+    """Check if the Docker image exists.
+
+    Returns:
+        True if the mcp-graylog Docker image is found, False otherwise.
+    """
     print("\nChecking Docker image...")
 
     try:
@@ -75,8 +83,12 @@ def check_docker_image():
         return False
 
 
-def test_container_startup():
-    """Test if the container can start successfully."""
+def test_container_startup() -> bool:
+    """Test if the container can start successfully.
+
+    Returns:
+        True if the container starts and runs, False otherwise.
+    """
     print("\nTesting container startup...")
 
     # Get environment variables for the test
@@ -154,8 +166,12 @@ def test_container_startup():
         return False
 
 
-def generate_cursor_config():
-    """Generate Cursor configuration examples."""
+def generate_cursor_config() -> bool:
+    """Generate and print Cursor configuration examples.
+
+    Returns:
+        Always True after printing the configuration.
+    """
     print("\nGenerating Cursor configuration examples...")
 
     # Get current environment variables
@@ -197,8 +213,12 @@ def generate_cursor_config():
     return True
 
 
-def main():
-    """Main test function."""
+def main() -> int:
+    """Run all integration tests and print summary.
+
+    Returns:
+        Exit code (0 on success, 1 on failure).
+    """
     print("Testing Cursor MCP Graylog Integration")
     print("=" * 60)
 

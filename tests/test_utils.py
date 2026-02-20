@@ -1,4 +1,4 @@
-"""Tests for utility functions."""
+"""Tests for the utility functions module."""
 
 import pytest
 from datetime import datetime, timedelta
@@ -17,7 +17,7 @@ from mcp_graylog.utils import (
 class TestParseTimeRange:
     """Test cases for parse_time_range function."""
 
-    def test_parse_time_range_hours(self):
+    def test_parse_time_range_hours(self) -> None:
         """Test parsing time range with hours."""
         result = parse_time_range("2h")
 
@@ -27,7 +27,7 @@ class TestParseTimeRange:
         assert isinstance(result["to"], datetime)
         assert result["to"] > result["from"]
 
-    def test_parse_time_range_days(self):
+    def test_parse_time_range_days(self) -> None:
         """Test parsing time range with days."""
         result = parse_time_range("3d")
 
@@ -36,7 +36,7 @@ class TestParseTimeRange:
         assert isinstance(result["from"], datetime)
         assert isinstance(result["to"], datetime)
 
-    def test_parse_time_range_weeks(self):
+    def test_parse_time_range_weeks(self) -> None:
         """Test parsing time range with weeks."""
         result = parse_time_range("1w")
 
@@ -45,7 +45,7 @@ class TestParseTimeRange:
         assert isinstance(result["from"], datetime)
         assert isinstance(result["to"], datetime)
 
-    def test_parse_time_range_minutes(self):
+    def test_parse_time_range_minutes(self) -> None:
         """Test parsing time range with minutes."""
         result = parse_time_range("30m")
 
@@ -54,17 +54,17 @@ class TestParseTimeRange:
         assert isinstance(result["from"], datetime)
         assert isinstance(result["to"], datetime)
 
-    def test_parse_time_range_empty(self):
+    def test_parse_time_range_empty(self) -> None:
         """Test parsing empty time range."""
         result = parse_time_range("")
         assert result == {}
 
-    def test_parse_time_range_none(self):
+    def test_parse_time_range_none(self) -> None:
         """Test parsing None time range."""
         result = parse_time_range(None)
         assert result == {}
 
-    def test_parse_time_range_invalid(self):
+    def test_parse_time_range_invalid(self) -> None:
         """Test parsing invalid time range."""
         result = parse_time_range("invalid")
         assert result == {}
@@ -73,12 +73,12 @@ class TestParseTimeRange:
 class TestBuildElasticsearchQuery:
     """Test cases for build_elasticsearch_query function."""
 
-    def test_build_query_no_filters(self):
+    def test_build_query_no_filters(self) -> None:
         """Test building query without filters."""
         result = build_elasticsearch_query("*", {})
         assert result == "*"
 
-    def test_build_query_with_simple_filters(self):
+    def test_build_query_with_simple_filters(self) -> None:
         """Test building query with simple filters."""
         filters = {"level": "ERROR", "source": "web-server"}
         result = build_elasticsearch_query("*", filters)
@@ -86,13 +86,13 @@ class TestBuildElasticsearchQuery:
         assert "source:web-server" in result
         assert " AND " in result
 
-    def test_build_query_with_spaces_in_value(self):
+    def test_build_query_with_spaces_in_value(self) -> None:
         """Test building query with spaces in filter values."""
         filters = {"message": "error occurred"}
         result = build_elasticsearch_query("*", filters)
         assert 'message:"error occurred"' in result
 
-    def test_build_query_with_base_query(self):
+    def test_build_query_with_base_query(self) -> None:
         """Test building query with existing base query."""
         filters = {"level": "ERROR"}
         result = build_elasticsearch_query("source:web-server", filters)
@@ -102,43 +102,43 @@ class TestBuildElasticsearchQuery:
 class TestExtractLogLevel:
     """Test cases for extract_log_level function."""
 
-    def test_extract_error_level(self):
+    def test_extract_error_level(self) -> None:
         """Test extracting ERROR level."""
         message = "This is an ERROR message"
         result = extract_log_level(message)
         assert result == "ERROR"
 
-    def test_extract_critical_level(self):
+    def test_extract_critical_level(self) -> None:
         """Test extracting CRITICAL level."""
         message = "CRITICAL system failure"
         result = extract_log_level(message)
         assert result == "CRITICAL"
 
-    def test_extract_warning_level(self):
+    def test_extract_warning_level(self) -> None:
         """Test extracting WARNING level."""
         message = "WARNING: disk space low"
         result = extract_log_level(message)
         assert result == "WARNING"
 
-    def test_extract_info_level(self):
+    def test_extract_info_level(self) -> None:
         """Test extracting INFO level."""
         message = "INFO: user logged in"
         result = extract_log_level(message)
         assert result == "INFO"
 
-    def test_extract_debug_level(self):
+    def test_extract_debug_level(self) -> None:
         """Test extracting DEBUG level."""
         message = "DEBUG: processing request"
         result = extract_log_level(message)
         assert result == "DEBUG"
 
-    def test_extract_no_level(self):
+    def test_extract_no_level(self) -> None:
         """Test extracting no level from message."""
         message = "This is a regular message"
         result = extract_log_level(message)
         assert result is None
 
-    def test_extract_case_insensitive(self):
+    def test_extract_case_insensitive(self) -> None:
         """Test extracting level case insensitive."""
         message = "This is an error message"
         result = extract_log_level(message)
@@ -148,7 +148,7 @@ class TestExtractLogLevel:
 class TestFormatLogEntry:
     """Test cases for format_log_entry function."""
 
-    def test_format_log_entry_basic(self):
+    def test_format_log_entry_basic(self) -> None:
         """Test formatting basic log entry."""
         log_entry = {
             "timestamp": "2023-01-01T12:00:00Z",
@@ -163,7 +163,7 @@ class TestFormatLogEntry:
         assert result["source"] == "test-source"
         assert "raw" in result
 
-    def test_format_log_entry_with_level(self):
+    def test_format_log_entry_with_level(self) -> None:
         """Test formatting log entry with level."""
         log_entry = {
             "timestamp": "2023-01-01T12:00:00Z",
@@ -176,7 +176,7 @@ class TestFormatLogEntry:
 
         assert result["level"] == "ERROR"
 
-    def test_format_log_entry_extract_level(self):
+    def test_format_log_entry_extract_level(self) -> None:
         """Test formatting log entry with level extraction."""
         log_entry = {
             "timestamp": "2023-01-01T12:00:00Z",
@@ -188,7 +188,7 @@ class TestFormatLogEntry:
 
         assert result["level"] == "ERROR"
 
-    def test_format_log_entry_additional_fields(self):
+    def test_format_log_entry_additional_fields(self) -> None:
         """Test formatting log entry with additional fields."""
         log_entry = {
             "timestamp": "2023-01-01T12:00:00Z",
@@ -207,37 +207,37 @@ class TestFormatLogEntry:
 class TestValidateQuerySyntax:
     """Test cases for validate_query_syntax function."""
 
-    def test_validate_empty_query(self):
+    def test_validate_empty_query(self) -> None:
         """Test validating empty query."""
         result = validate_query_syntax("")
         assert result is False
 
-    def test_validate_none_query(self):
+    def test_validate_none_query(self) -> None:
         """Test validating None query."""
         result = validate_query_syntax(None)
         assert result is False
 
-    def test_validate_simple_query(self):
+    def test_validate_simple_query(self) -> None:
         """Test validating simple query."""
         result = validate_query_syntax("test")
         assert result is True
 
-    def test_validate_query_with_quotes(self):
+    def test_validate_query_with_quotes(self) -> None:
         """Test validating query with quotes."""
         result = validate_query_syntax('message:"test message"')
         assert result is True
 
-    def test_validate_query_with_parentheses(self):
+    def test_validate_query_with_parentheses(self) -> None:
         """Test validating query with parentheses."""
         result = validate_query_syntax("(level:ERROR) AND (source:web)")
         assert result is True
 
-    def test_validate_query_unbalanced_parentheses(self):
+    def test_validate_query_unbalanced_parentheses(self) -> None:
         """Test validating query with unbalanced parentheses."""
         result = validate_query_syntax("(level:ERROR AND source:web")
         assert result is False
 
-    def test_validate_query_unbalanced_quotes(self):
+    def test_validate_query_unbalanced_quotes(self) -> None:
         """Test validating query with unbalanced quotes."""
         result = validate_query_syntax('message:"test message')
         assert result is False
@@ -246,7 +246,7 @@ class TestValidateQuerySyntax:
 class TestGetCommonLogFields:
     """Test cases for get_common_log_fields function."""
 
-    def test_get_common_log_fields(self):
+    def test_get_common_log_fields(self) -> None:
         """Test getting common log fields."""
         fields = get_common_log_fields()
 
@@ -261,7 +261,7 @@ class TestGetCommonLogFields:
 class TestParseGraylogResponse:
     """Test cases for parse_graylog_response function."""
 
-    def test_parse_graylog_response_basic(self):
+    def test_parse_graylog_response_basic(self) -> None:
         """Test parsing basic Graylog response."""
         response = {
             "total_results": 10,
@@ -288,7 +288,7 @@ class TestParseGraylogResponse:
         assert len(result["messages"]) == 1
         assert result["messages"][0]["message"] == "Test message"
 
-    def test_parse_graylog_response_empty(self):
+    def test_parse_graylog_response_empty(self) -> None:
         """Test parsing empty Graylog response."""
         response = {"total_results": 0, "execution_time": 0.1, "messages": []}
 

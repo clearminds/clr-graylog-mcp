@@ -1,10 +1,16 @@
-"""MCP server for Graylog integration."""
+"""MCP server for Graylog integration.
+
+Exposes Graylog search, stream, aggregation, and system tools via the
+Model Context Protocol (MCP) using FastMCP.
+"""
+
+from __future__ import annotations
 
 import json
 import logging
 import os
 import sys
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastmcp import FastMCP
 from pydantic import BaseModel, Field, validator
@@ -27,29 +33,40 @@ graylog_client = GraylogClient()
 
 
 class SearchLogsRequest(BaseModel):
-    """Request model for searching logs."""
+    """Request model for searching logs.
+
+    Attributes:
+        query: Elasticsearch-syntax search query.
+        time_range: Relative or absolute time range string.
+        fields: Specific fields to include in results.
+        limit: Maximum number of results to return.
+        offset: Pagination offset for results.
+        sort: Field name to sort results by.
+        sort_direction: Sort order, either "asc" or "desc".
+        stream_id: Restrict search to a specific stream.
+    """
 
     query: str = Field(..., description="Search query (Elasticsearch syntax)")
-    time_range: Optional[str] = Field(
+    time_range: str | None = Field(
         "1h",  # <-- Set default to 1h
         description="Time range (e.g., '1h', '24h', '7d'). Defaults to '1h' if not specified.",
     )
-    fields: Optional[List[str]] = Field(None, description="Fields to return")
+    fields: list[str] | None = Field(None, description="Fields to return")
     limit: int = Field(50, description="Maximum number of results")
     offset: int = Field(0, description="Result offset")
-    sort: Optional[str] = Field(None, description="Sort field")
+    sort: str | None = Field(None, description="Sort field")
     sort_direction: str = Field("desc", description="Sort direction (asc/desc)")
-    stream_id: Optional[str] = Field(None, description="Stream ID to search in")
+    stream_id: str | None = Field(None, description="Stream ID to search in")
 
     @validator("query")
-    def validate_query(cls, v):
+    def validate_query(cls, v: str) -> str:
         """Validate that query is not empty."""
         if not v or not v.strip():
             raise ValueError("Query cannot be empty")
         return v.strip()
 
     @validator("limit")
-    def validate_limit(cls, v):
+    def validate_limit(cls, v: int) -> int:
         """Validate limit is within reasonable bounds."""
         if v < 1:
             raise ValueError("Limit must be at least 1")
@@ -58,7 +75,7 @@ class SearchLogsRequest(BaseModel):
         return v
 
     @validator("time_range")
-    def validate_time_range(cls, v):
+    def validate_time_range(cls, v: str | None) -> str | None:
         """Validate time range format."""
         if v is None:
             return v
@@ -83,7 +100,16 @@ class SearchLogsRequest(BaseModel):
 
 
 class AggregationRequest(BaseModel):
-    """Request model for log aggregations."""
+    """Request model for log aggregations.
+
+    Attributes:
+        query: Elasticsearch-syntax search query to filter logs before aggregation.
+        time_range: Relative or absolute time range string.
+        aggregation_type: Type of aggregation (e.g., "terms", "date_histogram").
+        field: Field name to aggregate on.
+        size: Number of aggregation buckets to return.
+        interval: Time interval for date histogram aggregations.
+    """
 
     query: str = Field(..., description="Search query")
     time_range: str = Field(
@@ -95,19 +121,19 @@ class AggregationRequest(BaseModel):
     )
     field: str = Field(..., description="Field to aggregate on")
     size: int = Field(10, description="Number of buckets")
-    interval: Optional[str] = Field(
+    interval: str | None = Field(
         None, description="Time interval for date histograms"
     )
 
     @validator("query")
-    def validate_query(cls, v):
+    def validate_query(cls, v: str) -> str:
         """Validate that query is not empty."""
         if not v or not v.strip():
             raise ValueError("Query cannot be empty")
         return v.strip()
 
     @validator("aggregation_type")
-    def validate_aggregation_type(cls, v):
+    def validate_aggregation_type(cls, v: str) -> str:
         """Validate aggregation type."""
         valid_types = [
             "terms",
@@ -126,14 +152,14 @@ class AggregationRequest(BaseModel):
         return v
 
     @validator("field")
-    def validate_field(cls, v):
+    def validate_field(cls, v: str) -> str:
         """Validate that field is not empty."""
         if not v or not v.strip():
             raise ValueError("Field cannot be empty")
         return v.strip()
 
     @validator("size")
-    def validate_size(cls, v):
+    def validate_size(cls, v: int) -> int:
         """Validate size is within reasonable bounds."""
         if v < 1:
             raise ValueError("Size must be at least 1")
@@ -142,7 +168,7 @@ class AggregationRequest(BaseModel):
         return v
 
     @validator("time_range")
-    def validate_time_range(cls, v):
+    def validate_time_range(cls, v: str) -> str:
         """Validate time range format."""
         if not v or not v.strip():
             raise ValueError("Time range is required")
@@ -167,7 +193,15 @@ class AggregationRequest(BaseModel):
 
 
 class StreamSearchRequest(BaseModel):
-    """Request model for searching logs in a specific stream."""
+    """Request model for searching logs in a specific stream.
+
+    Attributes:
+        stream_id: Unique identifier of the Graylog stream to search.
+        query: Elasticsearch-syntax search query.
+        time_range: Relative or absolute time range string.
+        fields: Specific fields to include in results.
+        limit: Maximum number of results (1--100).
+    """
 
     stream_id: str = Field(
         ..., description="Stream ID (e.g., '5abb3f2f7bb9fd00011595fe' for 1c_eventlog)"
@@ -176,31 +210,31 @@ class StreamSearchRequest(BaseModel):
         ...,
         description="Search query (e.g., '*' for all messages, 'level:ERROR' for errors)",
     )
-    time_range: Optional[str] = Field(
+    time_range: str | None = Field(
         "1h",
         description="Time range (e.g., '1h', '24h', '7d'). Defaults to '1h' if not specified.",
     )
-    fields: Optional[List[str]] = Field(
+    fields: list[str] | None = Field(
         None, description="Fields to return (e.g., ['message', 'level', 'source'])"
     )
     limit: int = Field(50, description="Maximum number of results (1-100)")
 
     @validator("stream_id")
-    def validate_stream_id(cls, v):
+    def validate_stream_id(cls, v: str) -> str:
         """Validate that stream_id is not empty."""
         if not v or not v.strip():
             raise ValueError("Stream ID cannot be empty")
         return v.strip()
 
     @validator("query")
-    def validate_query(cls, v):
+    def validate_query(cls, v: str) -> str:
         """Validate that query is not empty."""
         if not v or not v.strip():
             raise ValueError("Query cannot be empty")
         return v.strip()
 
     @validator("limit")
-    def validate_limit(cls, v):
+    def validate_limit(cls, v: int) -> int:
         """Validate limit is within reasonable bounds."""
         if v < 1:
             raise ValueError("Limit must be at least 1")
@@ -209,7 +243,7 @@ class StreamSearchRequest(BaseModel):
         return v
 
     @validator("time_range")
-    def validate_time_range(cls, v):
+    def validate_time_range(cls, v: str | None) -> str | None:
         """Validate time range format."""
         if v is None:
             return v

@@ -24,7 +24,16 @@ CREDS_PATH = Path.home() / ".config" / "graylog" / "credentials.json"
 
 
 class GraylogConfig(BaseSettings):
-    """Graylog connection configuration."""
+    """Graylog connection configuration.
+
+    Attributes:
+        endpoint: Graylog server endpoint URL.
+        token: API token for token-based authentication (preferred).
+        username: Username for basic authentication.
+        password: Password for basic authentication.
+        verify_ssl: Whether to verify SSL certificates.
+        timeout: Request timeout in seconds.
+    """
 
     endpoint: str = Field("http://localhost:9000", description="Graylog server endpoint URL")
     token: str = Field("", description="Graylog API token (preferred auth method)")
@@ -37,7 +46,13 @@ class GraylogConfig(BaseSettings):
 
 
 class ServerConfig(BaseSettings):
-    """MCP server configuration."""
+    """MCP server configuration.
+
+    Attributes:
+        host: Server bind address.
+        port: Server port number.
+        log_level: Python logging level name.
+    """
 
     host: str = Field("0.0.0.0", description="Server host")
     port: int = Field(8000, description="Server port")
@@ -47,14 +62,22 @@ class ServerConfig(BaseSettings):
 
 
 class Config:
-    """Main configuration class with Clearminds credential loading."""
+    """Main configuration class with Clearminds credential loading.
 
-    def __init__(self):
+    Loads settings from environment variables first, then overrides with
+    values from ``~/.config/graylog/credentials.json`` when present.
+
+    Attributes:
+        graylog: Graylog connection settings.
+        server: MCP server settings.
+    """
+
+    def __init__(self) -> None:
         self.graylog = GraylogConfig()
         self.server = ServerConfig()
         self._load_credentials_file()
 
-    def _load_credentials_file(self):
+    def _load_credentials_file(self) -> None:
         """Override env vars with credentials.json if it exists."""
         if not CREDS_PATH.exists():
             return
@@ -78,7 +101,7 @@ class Config:
             logger.warning(f"Failed to load {CREDS_PATH}: {e}")
 
     @property
-    def auth_headers(self) -> dict:
+    def auth_headers(self) -> dict[str, str]:
         """Get authentication headers for Graylog API.
 
         Token auth: uses token as username with literal "token" as password.

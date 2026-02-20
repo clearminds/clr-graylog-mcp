@@ -8,8 +8,12 @@ import sys
 import os
 
 
-def test_pydantic_fix():
-    """Test that Pydantic settings work correctly."""
+def test_pydantic_fix() -> bool:
+    """Test that Pydantic settings work correctly.
+
+    Returns:
+        True if all Pydantic imports and config loading succeed.
+    """
     print("Testing Pydantic settings fix...")
 
     try:
@@ -38,8 +42,12 @@ def test_pydantic_fix():
         return False
 
 
-def test_fastmcp_fix():
-    """Test that FastMCP API works correctly."""
+def test_fastmcp_fix() -> bool:
+    """Test that FastMCP API works correctly.
+
+    Returns:
+        True if FastMCP can be imported and initialized.
+    """
     print("\nTesting FastMCP API fix...")
 
     try:
@@ -59,8 +67,12 @@ def test_fastmcp_fix():
         return False
 
 
-def test_server_import():
-    """Test that the server module can be imported."""
+def test_server_import() -> bool:
+    """Test that the server module can be imported.
+
+    Returns:
+        True if the server module imports without error.
+    """
     print("\nTesting server module import...")
 
     try:
@@ -73,8 +85,12 @@ def test_server_import():
         return False
 
 
-def test_pydantic_settings():
-    """Test that Pydantic settings work with ConfigDict."""
+def test_pydantic_settings() -> bool:
+    """Test that Pydantic settings work with ConfigDict.
+
+    Returns:
+        True if a BaseSettings subclass with ConfigDict initializes.
+    """
     print("\nTesting Pydantic settings with ConfigDict...")
 
     try:
@@ -93,8 +109,12 @@ def test_pydantic_settings():
         return False
 
 
-def main():
-    """Run all tests."""
+def main() -> int:
+    """Run all tests and print summary.
+
+    Returns:
+        Exit code (0 on success, 1 on failure).
+    """
     print("Testing Pydantic and FastMCP fixes...")
     print("=" * 50)
 

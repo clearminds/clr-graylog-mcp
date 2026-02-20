@@ -11,8 +11,12 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 
-def test_config_import():
-    """Test that the config module can be imported without deprecation warnings."""
+def test_config_import() -> bool:
+    """Test that the config module can be imported without deprecation warnings.
+
+    Returns:
+        True if the config module imports successfully.
+    """
     try:
         from mcp_graylog.config import config
 
@@ -23,8 +27,12 @@ def test_config_import():
         return False
 
 
-def test_pydantic_settings():
-    """Test that pydantic-settings works correctly."""
+def test_pydantic_settings() -> bool:
+    """Test that pydantic-settings works correctly.
+
+    Returns:
+        True if BaseSettings imports from pydantic_settings.
+    """
     try:
         from pydantic_settings import BaseSettings
 
@@ -35,8 +43,12 @@ def test_pydantic_settings():
         return False
 
 
-def test_pydantic_field():
-    """Test that pydantic Field import works."""
+def test_pydantic_field() -> bool:
+    """Test that pydantic Field import works.
+
+    Returns:
+        True if Field imports from pydantic.
+    """
     try:
         from pydantic import Field
 
@@ -47,8 +59,12 @@ def test_pydantic_field():
         return False
 
 
-def test_pydantic_config():
-    """Test that pydantic ConfigDict works."""
+def test_pydantic_config() -> bool:
+    """Test that pydantic ConfigDict works.
+
+    Returns:
+        True if ConfigDict imports from pydantic.
+    """
     try:
         from pydantic import ConfigDict
 
@@ -59,8 +75,12 @@ def test_pydantic_config():
         return False
 
 
-def test_integration():
-    """Test that all components work together."""
+def test_integration() -> bool:
+    """Test that all components work together.
+
+    Returns:
+        True if a BaseSettings subclass with ConfigDict initializes.
+    """
     try:
         from pydantic import ConfigDict
         from pydantic_settings import BaseSettings
@@ -77,8 +97,12 @@ def test_integration():
         return False
 
 
-def main():
-    """Run all tests."""
+def main() -> int:
+    """Run all Pydantic fix tests and print summary.
+
+    Returns:
+        Exit code (0 on success, 1 on failure).
+    """
     print("Testing Pydantic fix...")
     print("=" * 50)
 

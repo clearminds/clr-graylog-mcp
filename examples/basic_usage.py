@@ -9,7 +9,6 @@ to query logs and get statistics.
 import json
 import os
 import sys
-from typing import Dict, Any
 
 # Add the parent directory to the path so we can import mcp_graylog
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -17,8 +16,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from mcp_graylog.client import GraylogClient, QueryParams, AggregationParams
 
 
-def example_search_logs():
-    """Example: Search for error logs from the last hour."""
+def example_search_logs() -> None:
+    """Demonstrate searching for error logs from the last hour."""
     print("=== Example: Search Error Logs ===")
 
     # Create query parameters
@@ -38,8 +37,8 @@ def example_search_logs():
     print()
 
 
-def example_get_statistics():
-    """Example: Get log count by level for the last 24 hours."""
+def example_get_statistics() -> None:
+    """Demonstrate getting log count by level for the last 24 hours."""
     print("=== Example: Log Statistics by Level ===")
 
     # Create aggregation parameters
@@ -58,8 +57,8 @@ def example_get_statistics():
     print()
 
 
-def example_stream_search():
-    """Example: Search logs in a specific stream."""
+def example_stream_search() -> None:
+    """Demonstrate searching logs in a specific stream."""
     print("=== Example: Stream Search ===")
 
     # Create query parameters for a specific stream
@@ -76,8 +75,8 @@ def example_stream_search():
     print()
 
 
-def example_complex_query():
-    """Example: Complex query with multiple conditions."""
+def example_complex_query() -> None:
+    """Demonstrate a complex query with multiple conditions."""
     print("=== Example: Complex Query ===")
 
     # Complex query with multiple conditions
@@ -102,8 +101,8 @@ def example_complex_query():
     print()
 
 
-def example_time_range_parsing():
-    """Example: Different time range formats."""
+def example_time_range_parsing() -> None:
+    """Demonstrate different time range formats."""
     print("=== Example: Time Range Parsing ===")
 
     time_ranges = ["1h", "24h", "7d", "1w", "30m"]
@@ -117,7 +116,7 @@ def example_time_range_parsing():
     print()
 
 
-def main():
+def main() -> None:
     """Run all examples."""
     print("MCP Graylog Server - Usage Examples")
     print("=" * 50)
