@@ -33,6 +33,7 @@ class GraylogConfig(BaseSettings):
         password: Password for basic authentication.
         verify_ssl: Whether to verify SSL certificates.
         timeout: Request timeout in seconds.
+        read_only: Enable read-only mode (hide write tools at startup).
     """
 
     endpoint: str = Field("http://localhost:9000", description="Graylog server endpoint URL")
@@ -41,6 +42,7 @@ class GraylogConfig(BaseSettings):
     password: str = Field("", description="Graylog password (basic auth)")
     verify_ssl: bool = Field(True, description="Verify SSL certificates")
     timeout: int = Field(60, description="Request timeout in seconds")
+    read_only: bool = Field(False, description="Enable read-only mode (hide write tools)")
 
     model_config = ConfigDict(env_prefix="GRAYLOG_", case_sensitive=False)
 

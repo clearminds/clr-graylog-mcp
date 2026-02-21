@@ -31,6 +31,9 @@ mcp_server = FastMCP("graylog")
 # Initialize Graylog client
 graylog_client = GraylogClient()
 
+# Tools removed in read-only mode. All graylog tools are read-only.
+WRITE_TOOLS: list[str] = []
+
 
 class SearchLogsRequest(BaseModel):
     """Request model for searching logs.
@@ -769,6 +772,12 @@ def main() -> None:
     parser.add_argument(
         "--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"],
     )
+    parser.add_argument(
+        "--read-only",
+        action="store_true",
+        default=None,
+        help="Run in read-only mode (hide write tools)",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -787,6 +796,13 @@ def main() -> None:
 
     logger.info(f"Graylog endpoint: {config.graylog.endpoint}")
     logger.info(f"Auth method: {'token' if config.graylog.token else 'username/password'}")
+
+    # Read-only mode: remove write tools
+    read_only = args.read_only if args.read_only is not None else config.graylog.read_only
+    if read_only and WRITE_TOOLS:
+        for name in WRITE_TOOLS:
+            mcp_server.remove_tool(name)
+        logger.info("Read-only mode: %d write tools removed", len(WRITE_TOOLS))
 
     mcp_server.run(transport=args.transport)
 
