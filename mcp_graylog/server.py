@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field, validator
 
 from .client import GraylogClient, QueryParams, AggregationParams
 from .config import config
+from .middleware import ToolValidationMiddleware
 
 # Configure logging
 logging.basicConfig(
@@ -27,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 # Initialize FastMCP server
 mcp_server = FastMCP("graylog")
+mcp_server.add_middleware(ToolValidationMiddleware())
 
 # Initialize Graylog client
 graylog_client = GraylogClient()
