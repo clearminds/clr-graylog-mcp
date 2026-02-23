@@ -159,6 +159,13 @@ The server can be configured using environment variables:
 | `LOG_LEVEL` | Logging level | No | INFO |
 | `LOG_FORMAT` | Log format (json/text) | No | json |
 
+Optional:
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `GRAYLOG_READ_ONLY` | Run in read-only mode | `false` |
+| `MCP_SERVER_LOG_LEVEL` | Log level | `INFO` |
+
 *Both username and password are required.*
 
 ## Usage

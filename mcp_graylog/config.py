@@ -15,7 +15,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from pydantic import Field, ConfigDict
+from pydantic import ConfigDict, Field, field_validator
 from pydantic_settings import BaseSettings
 
 logger = logging.getLogger(__name__)
@@ -43,6 +43,13 @@ class GraylogConfig(BaseSettings):
     verify_ssl: bool = Field(True, description="Verify SSL certificates")
     timeout: int = Field(60, description="Request timeout in seconds")
     read_only: bool = Field(False, description="Enable read-only mode (hide write tools)")
+
+    @field_validator("verify_ssl", "read_only", mode="before")
+    @classmethod
+    def _empty_str_to_false(cls, v: Any) -> Any:
+        if v == "":
+            return False
+        return v
 
     model_config = ConfigDict(env_prefix="GRAYLOG_", case_sensitive=False)
 
