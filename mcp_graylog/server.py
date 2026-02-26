@@ -1,40 +1,50 @@
 """MCP server for Graylog integration.
 
-Exposes Graylog search, stream, aggregation, and system tools via the
-Model Context Protocol (MCP) using FastMCP.
+Exposes Graylog search, stream, aggregation, system, notification, and
+sidecar tools via the Model Context Protocol (MCP) using FastMCP.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import os
 import sys
 from typing import Any
 
 from fastmcp import FastMCP
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
-from .client import GraylogClient, QueryParams, AggregationParams
-from .config import config
+from .client import AggregationParams, GraylogClient, QueryParams
+from .config import Settings
 from .middleware import ToolValidationMiddleware
 
-# Configure logging
-logging.basicConfig(
-    level=getattr(logging, config.server.log_level),
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
-logger = logging.getLogger(__name__)
+# ---------------------------------------------------------------------------
+# FastMCP server
+# ---------------------------------------------------------------------------
 
-# Initialize FastMCP server
 mcp_server = FastMCP("graylog")
 mcp_server.add_middleware(ToolValidationMiddleware())
 
-# Initialize Graylog client
-graylog_client = GraylogClient()
+logger = logging.getLogger(__name__)
 
-# Tools removed in read-only mode. All graylog tools are read-only.
-WRITE_TOOLS: list[str] = []
+# ---------------------------------------------------------------------------
+# Global state — initialised in main()
+# ---------------------------------------------------------------------------
+
+settings = Settings()
+_client: GraylogClient | None = None
+
+# Tools removed in read-only mode.
+WRITE_TOOLS: list[str] = [
+    "graylog_dismiss_notification",
+    "graylog_update_sidecar_tags",
+    "graylog_assign_sidecar_configurations",
+    "graylog_sidecar_action",
+]
+
+# ---------------------------------------------------------------------------
+# Pydantic request models
+# ---------------------------------------------------------------------------
 
 
 class SearchLogsRequest(BaseModel):
@@ -53,7 +63,7 @@ class SearchLogsRequest(BaseModel):
 
     query: str = Field(..., description="Search query (Elasticsearch syntax)")
     time_range: str | None = Field(
-        "1h",  # <-- Set default to 1h
+        "1h",
         description="Time range (e.g., '1h', '24h', '7d'). Defaults to '1h' if not specified.",
     )
     fields: list[str] | None = Field(None, description="Fields to return")
@@ -63,14 +73,16 @@ class SearchLogsRequest(BaseModel):
     sort_direction: str = Field("desc", description="Sort direction (asc/desc)")
     stream_id: str | None = Field(None, description="Stream ID to search in")
 
-    @validator("query")
+    @field_validator("query")
+    @classmethod
     def validate_query(cls, v: str) -> str:
         """Validate that query is not empty."""
         if not v or not v.strip():
             raise ValueError("Query cannot be empty")
         return v.strip()
 
-    @validator("limit")
+    @field_validator("limit")
+    @classmethod
     def validate_limit(cls, v: int) -> int:
         """Validate limit is within reasonable bounds."""
         if v < 1:
@@ -79,20 +91,19 @@ class SearchLogsRequest(BaseModel):
             raise ValueError("Limit cannot exceed 1000")
         return v
 
-    @validator("time_range")
+    @field_validator("time_range")
+    @classmethod
     def validate_time_range(cls, v: str | None) -> str | None:
         """Validate time range format."""
         if v is None:
             return v
 
-        # Check for relative time ranges (e.g., '1h', '24h', '7d')
         import re
 
         relative_pattern = r"^\d+[smhdw]$"
         if re.match(relative_pattern, v):
             return v
 
-        # Check for ISO 8601 format (absolute time ranges)
         try:
             from datetime import datetime
 
@@ -130,14 +141,16 @@ class AggregationRequest(BaseModel):
         None, description="Time interval for date histograms"
     )
 
-    @validator("query")
+    @field_validator("query")
+    @classmethod
     def validate_query(cls, v: str) -> str:
         """Validate that query is not empty."""
         if not v or not v.strip():
             raise ValueError("Query cannot be empty")
         return v.strip()
 
-    @validator("aggregation_type")
+    @field_validator("aggregation_type")
+    @classmethod
     def validate_aggregation_type(cls, v: str) -> str:
         """Validate aggregation type."""
         valid_types = [
@@ -156,14 +169,16 @@ class AggregationRequest(BaseModel):
             )
         return v
 
-    @validator("field")
+    @field_validator("field")
+    @classmethod
     def validate_field(cls, v: str) -> str:
         """Validate that field is not empty."""
         if not v or not v.strip():
             raise ValueError("Field cannot be empty")
         return v.strip()
 
-    @validator("size")
+    @field_validator("size")
+    @classmethod
     def validate_size(cls, v: int) -> int:
         """Validate size is within reasonable bounds."""
         if v < 1:
@@ -172,20 +187,19 @@ class AggregationRequest(BaseModel):
             raise ValueError("Size cannot exceed 100")
         return v
 
-    @validator("time_range")
+    @field_validator("time_range")
+    @classmethod
     def validate_time_range(cls, v: str) -> str:
         """Validate time range format."""
         if not v or not v.strip():
             raise ValueError("Time range is required")
 
-        # Check for relative time ranges (e.g., '1h', '24h', '7d')
         import re
 
         relative_pattern = r"^\d+[smhdw]$"
         if re.match(relative_pattern, v):
             return v
 
-        # Check for ISO 8601 format (absolute time ranges)
         try:
             from datetime import datetime
 
@@ -209,7 +223,7 @@ class StreamSearchRequest(BaseModel):
     """
 
     stream_id: str = Field(
-        ..., description="Stream ID (e.g., '5abb3f2f7bb9fd00011595fe' for 1c_eventlog)"
+        ..., description="Stream ID (e.g., '5abb3f2f7bb9fd00011595fe')"
     )
     query: str = Field(
         ...,
@@ -224,21 +238,24 @@ class StreamSearchRequest(BaseModel):
     )
     limit: int = Field(50, description="Maximum number of results (1-100)")
 
-    @validator("stream_id")
+    @field_validator("stream_id")
+    @classmethod
     def validate_stream_id(cls, v: str) -> str:
         """Validate that stream_id is not empty."""
         if not v or not v.strip():
             raise ValueError("Stream ID cannot be empty")
         return v.strip()
 
-    @validator("query")
+    @field_validator("query")
+    @classmethod
     def validate_query(cls, v: str) -> str:
         """Validate that query is not empty."""
         if not v or not v.strip():
             raise ValueError("Query cannot be empty")
         return v.strip()
 
-    @validator("limit")
+    @field_validator("limit")
+    @classmethod
     def validate_limit(cls, v: int) -> int:
         """Validate limit is within reasonable bounds."""
         if v < 1:
@@ -247,20 +264,19 @@ class StreamSearchRequest(BaseModel):
             raise ValueError("Limit cannot exceed 100")
         return v
 
-    @validator("time_range")
+    @field_validator("time_range")
+    @classmethod
     def validate_time_range(cls, v: str | None) -> str | None:
         """Validate time range format."""
         if v is None:
             return v
 
-        # Check for relative time ranges (e.g., '1h', '24h', '7d')
         import re
 
         relative_pattern = r"^\d+[smhdw]$"
         if re.match(relative_pattern, v):
             return v
 
-        # Check for ISO 8601 format (absolute time ranges)
         try:
             from datetime import datetime
 
@@ -272,53 +288,36 @@ class StreamSearchRequest(BaseModel):
             )
 
 
+# ---------------------------------------------------------------------------
+# Instance tools
+# ---------------------------------------------------------------------------
+
+
 @mcp_server.tool()
-def search_logs(request: SearchLogsRequest) -> str:
+def graylog_instances() -> str:
+    """List all configured Graylog instances.
+
+    Returns name, endpoint, and default flag for each instance.
     """
-    Search logs in Graylog using Elasticsearch query syntax.
+    result = _client.list_instances()
+    return json.dumps({"items": result, "total": len(result)}, indent=2)
 
-    PURPOSE: Search and retrieve log messages from Graylog with flexible filtering and sorting options.
 
-    INPUT FORMAT: JSON object with the following structure:
-    {
-        "query": "level:ERROR AND source:nginx",  // REQUIRED: Elasticsearch query syntax
-        "time_range": "1h",                       // OPTIONAL: Time range (1h, 24h, 7d, etc.)
-        "fields": ["message", "level", "source"], // OPTIONAL: Specific fields to return
-        "limit": 50,                              // OPTIONAL: Max results (1-1000, default: 50)
-        "offset": 0,                              // OPTIONAL: Pagination offset
-        "sort": "timestamp",                      // OPTIONAL: Sort field
-        "sort_direction": "desc",                 // OPTIONAL: asc/desc
-        "stream_id": "stream_123"                 // OPTIONAL: Filter by specific stream
-    }
+# ---------------------------------------------------------------------------
+# Search tools
+# ---------------------------------------------------------------------------
 
-    QUERY EXAMPLES:
-    - "*" (all logs)
-    - "level:ERROR" (error logs only)
-    - "source:nginx AND level:ERROR" (nginx errors)
-    - "message:*error*" (logs containing "error")
-    - "timestamp:[2024-01-01 TO 2024-01-02]" (date range)
 
-    OUTPUT: JSON string with search results including messages, metadata, and pagination info.
+@mcp_server.tool()
+def graylog_search_logs(request: SearchLogsRequest, instance: str | None = None) -> str:
+    """Search logs in Graylog using Elasticsearch query syntax.
+
+    Args:
+        request: Search parameters including query, time_range, fields,
+            limit, offset, sort, sort_direction, and stream_id.
+        instance: Target Graylog instance name, or None for the default.
     """
-    # --- BEGIN PATCH ---
-    # Accept both dict and string input for request
-    if isinstance(request, str):
-        try:
-            request_dict = json.loads(request)
-            request = SearchLogsRequest(**request_dict)
-        except Exception as e:
-            return json.dumps(
-                {
-                    "error": f"Request must be a JSON object or a JSON string that can be parsed into an object. Error: {str(e)}"
-                },
-                indent=2,
-            )
-    # --- END PATCH ---
     try:
-        # Validate request
-        if not request.query:
-            return json.dumps({"error": "Query parameter is required"}, indent=2)
-
         params = QueryParams(
             query=request.query,
             time_range=request.time_range,
@@ -330,62 +329,26 @@ def search_logs(request: SearchLogsRequest) -> str:
             stream_id=request.stream_id,
         )
 
-        result = graylog_client.search_logs(params)
+        result = _client.search_logs(params, instance=instance)
         return json.dumps(result, indent=2)
 
-    except ValueError as e:
-        logger.error(f"Validation error in search_logs: {e}")
-        return json.dumps({"error": f"Validation error: {str(e)}"}, indent=2)
     except Exception as e:
-        logger.error(f"Search logs failed: {e}")
+        logger.error("graylog_search_logs failed: %s", e)
         return json.dumps({"error": str(e)}, indent=2)
 
 
 @mcp_server.tool()
-def get_log_statistics(request: AggregationRequest) -> str:
+def graylog_get_log_statistics(
+    request: AggregationRequest, instance: str | None = None
+) -> str:
+    """Get log statistics and aggregations from Graylog.
+
+    Args:
+        request: Aggregation parameters including query, time_range,
+            aggregation_type, field, size, and interval.
+        instance: Target Graylog instance name, or None for the default.
     """
-    Get log statistics and aggregations from Graylog.
-
-    PURPOSE: Analyze log data using aggregations to get insights like top sources, error counts, time-based trends.
-
-    INPUT FORMAT: JSON object with the following structure:
-    {
-        "query": "*",                    // REQUIRED: Search query to filter logs
-        "time_range": "1h",              // REQUIRED: Time range for analysis
-        "aggregation_type": "terms",      // REQUIRED: Type of aggregation
-        "field": "source",               // REQUIRED: Field to aggregate on
-        "size": 10,                      // OPTIONAL: Number of buckets (1-100)
-        "interval": "1h"                 // OPTIONAL: Time interval for date_histogram
-    }
-
-    AGGREGATION TYPES:
-    - "terms": Count occurrences by field values (e.g., top sources, levels)
-    - "date_histogram": Time-based grouping (requires interval parameter)
-    - "cardinality": Count unique values in a field
-    - "stats": Statistical summary (min, max, avg, sum)
-    - "min", "max", "avg", "sum": Single statistical value
-
-    FIELD EXAMPLES:
-    - "source": Group by log source
-    - "level": Group by log level
-    - "timestamp": For time-based analysis
-    - "message": For text analysis
-
-    OUTPUT: JSON string with aggregation results including buckets, counts, and statistics.
-    """
-    if isinstance(request, str):
-        return json.dumps(
-            {"error": "Request must be a JSON object, not a string."}, indent=2
-        )
     try:
-        # Validate request
-        if not request.query:
-            return json.dumps({"error": "Query parameter is required"}, indent=2)
-        if not request.field:
-            return json.dumps({"error": "Field parameter is required"}, indent=2)
-        if not request.time_range:
-            return json.dumps({"error": "Time range parameter is required"}, indent=2)
-
         aggregation = AggregationParams(
             type=request.aggregation_type,
             field=request.field,
@@ -393,114 +356,73 @@ def get_log_statistics(request: AggregationRequest) -> str:
             interval=request.interval,
         )
 
-        result = graylog_client.get_log_statistics(
-            query=request.query, time_range=request.time_range, aggregation=aggregation
+        result = _client.get_log_statistics(
+            query=request.query,
+            time_range=request.time_range,
+            aggregation=aggregation,
+            instance=instance,
         )
         return json.dumps(result, indent=2)
 
-    except ValueError as e:
-        logger.error(f"Validation error in get_log_statistics: {e}")
-        return json.dumps({"error": f"Validation error: {str(e)}"}, indent=2)
     except Exception as e:
-        logger.error(f"Get log statistics failed: {e}")
+        logger.error("graylog_get_log_statistics failed: %s", e)
+        return json.dumps({"error": str(e)}, indent=2)
+
+
+# ---------------------------------------------------------------------------
+# Stream tools
+# ---------------------------------------------------------------------------
+
+
+@mcp_server.tool()
+def graylog_list_streams(instance: str | None = None) -> str:
+    """List all available Graylog streams.
+
+    Args:
+        instance: Target Graylog instance name, or None for the default.
+    """
+    try:
+        streams = _client.list_streams(instance=instance)
+        return json.dumps(
+            {"items": streams, "total": len(streams)}, indent=2
+        )
+
+    except Exception as e:
+        logger.error("graylog_list_streams failed: %s", e)
         return json.dumps({"error": str(e)}, indent=2)
 
 
 @mcp_server.tool()
-def list_streams() -> str:
-    """
-    List all available Graylog streams.
+def graylog_get_stream_info(
+    stream_id: str, instance: str | None = None
+) -> str:
+    """Get detailed information about a specific Graylog stream.
 
-    PURPOSE: Get a complete list of all log streams configured in Graylog with their metadata.
-
-    INPUT: No parameters required.
-
-    OUTPUT: JSON string containing array of streams with:
-    - id: Unique stream identifier
-    - title: Human-readable stream name
-    - description: Stream description
-    - disabled: Whether stream is active
-    - rules: Stream processing rules
-    - created_at: Creation timestamp
-    - updated_at: Last update timestamp
+    Args:
+        stream_id: The unique identifier of the stream.
+        instance: Target Graylog instance name, or None for the default.
     """
     try:
-        streams = graylog_client.list_streams()
-        return json.dumps({"streams": streams}, indent=2)
-
-    except Exception as e:
-        logger.error(f"List streams failed: {e}")
-        return json.dumps({"error": str(e)}, indent=2)
-
-
-@mcp_server.tool()
-def get_stream_info(stream_id: str) -> str:
-    """
-    Get detailed information about a specific Graylog stream.
-
-    PURPOSE: Retrieve comprehensive details about a single stream including configuration, rules, and status.
-
-    INPUT:
-    - stream_id: REQUIRED - The unique identifier of the stream (e.g., "5abb3f2f7bb9fd00011595fe")
-
-    OUTPUT: JSON string containing detailed stream information including:
-    - Basic info (id, title, description)
-    - Configuration settings
-    - Processing rules
-    - Status and statistics
-    - Creation and update timestamps
-    """
-    try:
-        if not stream_id or not stream_id.strip():
-            return json.dumps({"error": "Stream ID is required"}, indent=2)
-
-        stream_info = graylog_client.get_stream_info(stream_id.strip())
+        stream_info = _client.get_stream_info(stream_id.strip(), instance=instance)
         return json.dumps(stream_info, indent=2)
 
-    except ValueError as e:
-        logger.error(f"Validation error in get_stream_info: {e}")
-        return json.dumps({"error": f"Validation error: {str(e)}"}, indent=2)
     except Exception as e:
-        logger.error(f"Get stream info failed: {e}")
+        logger.error("graylog_get_stream_info failed: %s", e)
         return json.dumps({"error": str(e)}, indent=2)
 
 
 @mcp_server.tool()
-def search_stream_logs(request: StreamSearchRequest) -> str:
+def graylog_search_stream_logs(
+    request: StreamSearchRequest, instance: str | None = None
+) -> str:
+    """Search logs within a specific Graylog stream.
+
+    Args:
+        request: Stream search parameters including stream_id, query,
+            time_range, fields, and limit.
+        instance: Target Graylog instance name, or None for the default.
     """
-    Search logs within a specific Graylog stream.
-
-    PURPOSE: Search log messages that belong to a particular stream with filtering and pagination.
-
-    INPUT FORMAT: JSON object with the following structure:
-    {
-        "stream_id": "5abb3f2f7bb9fd00011595fe",  // REQUIRED: Stream identifier
-        "query": "level:ERROR",                     // REQUIRED: Search query
-        "time_range": "1h",                         // OPTIONAL: Time range (default: 1h)
-        "fields": ["message", "level", "source"],   // OPTIONAL: Fields to return
-        "limit": 50                                 // OPTIONAL: Max results (1-100, default: 50)
-    }
-
-    QUERY EXAMPLES:
-    - "*" (all logs in stream)
-    - "level:ERROR" (errors in stream)
-    - "source:application" (logs from specific source)
-    - "message:*exception*" (logs containing "exception")
-
-    OUTPUT: JSON string with search results from the specified stream only.
-    """
-    if isinstance(request, str):
-        return json.dumps(
-            {"error": "Request must be a JSON object, not a string."}, indent=2
-        )
     try:
-        # Validate request
-        if not request.stream_id or not request.stream_id.strip():
-            return json.dumps({"error": "Stream ID is required"}, indent=2)
-        if not request.query or not request.query.strip():
-            return json.dumps({"error": "Query is required"}, indent=2)
-
-        # Create query parameters for stream search
         params = QueryParams(
             query=request.query,
             time_range=request.time_range,
@@ -509,183 +431,31 @@ def search_stream_logs(request: StreamSearchRequest) -> str:
             stream_id=request.stream_id,
         )
 
-        # Use the client's search_stream_logs method
-        result = graylog_client.search_stream_logs(request.stream_id, params)
-        return json.dumps(result, indent=2)
-
-    except ValueError as e:
-        logger.error(f"Validation error in search_stream_logs: {e}")
-        return json.dumps({"error": f"Validation error: {str(e)}"}, indent=2)
-    except Exception as e:
-        logger.error(f"Search stream logs failed: {e}")
-        return json.dumps({"error": str(e)}, indent=2)
-
-
-@mcp_server.tool()
-def get_system_info() -> str:
-    """
-    Get Graylog system information and status.
-
-    PURPOSE: Retrieve comprehensive system information about the Graylog instance including version, status, and configuration.
-
-    INPUT: No parameters required.
-
-    OUTPUT: JSON string containing system information including:
-    - Graylog version and build info
-    - System status and health
-    - Configuration details
-    - Resource usage statistics
-    - Cluster information (if applicable)
-    """
-    try:
-        system_info = graylog_client.get_system_info()
-        return json.dumps(system_info, indent=2)
-
-    except Exception as e:
-        logger.error(f"Get system info failed: {e}")
-        return json.dumps({"error": str(e)}, indent=2)
-
-
-@mcp_server.tool()
-def test_connection() -> str:
-    """
-    Test connection to Graylog server.
-
-    PURPOSE: Verify connectivity and authentication to the Graylog server.
-
-    INPUT: No parameters required.
-
-    OUTPUT: JSON string indicating connection status:
-    {
-        "connected": true/false,
-        "endpoint": "graylog_server_url",
-        "error": "error_message" (if connection failed)
-    }
-    """
-    try:
-        is_connected = graylog_client.test_connection()
-        return json.dumps(
-            {"connected": is_connected, "endpoint": config.graylog.endpoint}, indent=2
-        )
-
-    except Exception as e:
-        logger.error(f"Connection test failed: {e}")
-        return json.dumps(
-            {"connected": False, "error": str(e), "endpoint": config.graylog.endpoint},
-            indent=2,
-        )
-
-
-@mcp_server.tool()
-def get_error_logs(time_range: str = "1h", limit: int = 100) -> str:
-    """
-    Get error logs from the last specified time range.
-
-    PURPOSE: Quickly retrieve all error-level logs (ERROR, CRITICAL, FATAL) for troubleshooting and monitoring.
-
-    INPUT:
-    - time_range: OPTIONAL - Time range to search (default: "1h", examples: "30m", "24h", "7d")
-    - limit: OPTIONAL - Maximum number of results (1-1000, default: 100)
-
-    OUTPUT: JSON string containing error logs with fields:
-    - message: Log message content
-    - level: Log level (ERROR, CRITICAL, FATAL)
-    - source: Source of the log
-    - timestamp: When the log was generated
-    """
-    try:
-        # Validate parameters
-        if limit < 1 or limit > 1000:
-            return json.dumps({"error": "Limit must be between 1 and 1000"}, indent=2)
-
-        params = QueryParams(
-            query="level:ERROR OR level:CRITICAL OR level:FATAL",
-            time_range=time_range,
-            limit=limit,
-            fields=["message", "level", "source", "timestamp"],
-        )
-
-        result = graylog_client.search_logs(params)
-        return json.dumps(result, indent=2)
-
-    except ValueError as e:
-        logger.error(f"Validation error in get_error_logs: {e}")
-        return json.dumps({"error": f"Validation error: {str(e)}"}, indent=2)
-    except Exception as e:
-        logger.error(f"Get error logs failed: {e}")
-        return json.dumps({"error": str(e)}, indent=2)
-
-
-@mcp_server.tool()
-def get_log_count_by_level(time_range: str = "1h") -> str:
-    """
-    Get log count aggregated by log level.
-
-    PURPOSE: Analyze log volume by severity level to understand system health and log distribution.
-
-    INPUT:
-    - time_range: OPTIONAL - Time range to analyze (default: "1h", examples: "30m", "24h", "7d")
-
-    OUTPUT: JSON string containing log counts by level:
-    {
-        "aggregation": {
-            "buckets": [
-                {"key": "INFO", "doc_count": 1500},
-                {"key": "WARN", "doc_count": 200},
-                {"key": "ERROR", "doc_count": 50}
-            ]
-        }
-    }
-    """
-    try:
-        aggregation = AggregationParams(type="terms", field="level", size=10)
-
-        result = graylog_client.get_log_statistics(
-            query="*", time_range=time_range, aggregation=aggregation
+        result = _client.search_stream_logs(
+            request.stream_id, params, instance=instance
         )
         return json.dumps(result, indent=2)
 
-    except ValueError as e:
-        logger.error(f"Validation error in get_log_count_by_level: {e}")
-        return json.dumps({"error": f"Validation error: {str(e)}"}, indent=2)
     except Exception as e:
-        logger.error(f"Get log count by level failed: {e}")
+        logger.error("graylog_search_stream_logs failed: %s", e)
         return json.dumps({"error": str(e)}, indent=2)
 
 
 @mcp_server.tool()
-def search_streams_by_name(stream_name: str) -> str:
-    """
-    Search for Graylog streams by name or partial name.
+def graylog_search_streams_by_name(
+    stream_name: str, instance: str | None = None
+) -> str:
+    """Search for Graylog streams by name or partial name.
 
-    PURPOSE: Find streams by searching their titles, useful when you know part of the stream name but not the exact ID.
+    Case-insensitive partial matching on stream titles.
 
-    INPUT:
-    - stream_name: REQUIRED - Partial or full stream name to search for (e.g., '1c_eventlog', 'nginx', 'api')
-
-    OUTPUT: JSON string containing matching streams:
-    {
-        "search_term": "nginx",
-        "matches": [
-            {
-                "id": "stream_id_123",
-                "title": "nginx_access_logs",
-                "description": "Nginx access logs",
-                "disabled": false
-            }
-        ],
-        "total_matches": 1
-    }
-
-    SEARCH BEHAVIOR: Case-insensitive partial matching on stream titles.
+    Args:
+        stream_name: Partial or full stream name to search for.
+        instance: Target Graylog instance name, or None for the default.
     """
     try:
-        if not stream_name or not stream_name.strip():
-            return json.dumps({"error": "Stream name is required"}, indent=2)
+        all_streams = _client.list_streams(instance=instance)
 
-        all_streams = graylog_client.list_streams()
-
-        # Filter streams by name (case-insensitive)
         matching_streams = []
         search_term = stream_name.lower()
 
@@ -704,75 +474,415 @@ def search_streams_by_name(stream_name: str) -> str:
         return json.dumps(
             {
                 "search_term": stream_name,
-                "matches": matching_streams,
-                "total_matches": len(matching_streams),
+                "items": matching_streams,
+                "total": len(matching_streams),
             },
             indent=2,
         )
 
-    except ValueError as e:
-        logger.error(f"Validation error in search_streams_by_name: {e}")
-        return json.dumps({"error": f"Validation error: {str(e)}"}, indent=2)
     except Exception as e:
-        logger.error(f"Search streams by name failed: {e}")
+        logger.error("graylog_search_streams_by_name failed: %s", e)
         return json.dumps({"error": str(e)}, indent=2)
 
 
 @mcp_server.tool()
-def get_last_event_from_stream(stream_id: str, time_range: str = "1h") -> str:
-    """
-    Get the last event from a specific Graylog stream.
+def graylog_get_last_event_from_stream(
+    stream_id: str,
+    time_range: str = "1h",
+    instance: str | None = None,
+) -> str:
+    """Get the last event from a specific Graylog stream.
 
-    PURPOSE: Retrieve the most recent log message from a specific stream, useful for monitoring and checking if a stream is active.
-
-    INPUT:
-    - stream_id: REQUIRED - The ID of the stream to get the last event from (e.g., "5abb3f2f7bb9fd00011595fe")
-    - time_range: OPTIONAL - Time range to search in (default: "1h", examples: "30m", "24h", "7d")
-
-    OUTPUT: JSON string containing the last event from the specified stream:
-    {
-        "messages": [
-            {
-                "message": "Last log message content",
-                "timestamp": "2024-01-01T12:00:00.000Z",
-                "source": "application_name",
-                "level": "INFO"
-            }
-        ],
-        "total_results": 1
-    }
-
-    USAGE: Use this to check if a stream is receiving logs or to get the latest activity.
+    Args:
+        stream_id: The ID of the stream to get the last event from.
+        time_range: Time range to search in (default: "1h").
+        instance: Target Graylog instance name, or None for the default.
     """
     try:
-        if not stream_id or not stream_id.strip():
-            return json.dumps({"error": "Stream ID is required"}, indent=2)
-
         params = QueryParams(
             query="*", time_range=time_range, limit=1, stream_id=stream_id
         )
 
-        result = graylog_client.search_stream_logs(stream_id, params)
+        result = _client.search_stream_logs(
+            stream_id, params, instance=instance
+        )
         return json.dumps(result, indent=2)
 
-    except ValueError as e:
-        logger.error(f"Validation error in get_last_event_from_stream: {e}")
-        return json.dumps({"error": f"Validation error: {str(e)}"}, indent=2)
     except Exception as e:
-        logger.error(f"Get last event from stream failed: {e}")
+        logger.error("graylog_get_last_event_from_stream failed: %s", e)
         return json.dumps({"error": str(e)}, indent=2)
+
+
+# ---------------------------------------------------------------------------
+# System tools
+# ---------------------------------------------------------------------------
+
+
+@mcp_server.tool()
+def graylog_get_system_info(instance: str | None = None) -> str:
+    """Get Graylog system information and status.
+
+    Args:
+        instance: Target Graylog instance name, or None for the default.
+    """
+    try:
+        system_info = _client.get_system_info(instance=instance)
+        return json.dumps(system_info, indent=2)
+
+    except Exception as e:
+        logger.error("graylog_get_system_info failed: %s", e)
+        return json.dumps({"error": str(e)}, indent=2)
+
+
+@mcp_server.tool()
+def graylog_test_connection(instance: str | None = None) -> str:
+    """Test connection to a Graylog server.
+
+    Args:
+        instance: Target Graylog instance name, or None for the default.
+    """
+    try:
+        name = instance or _client.default_name
+        inst = _client.instances.get(name)
+        endpoint = inst.endpoint if inst else "unknown"
+        is_connected = _client.test_connection(instance=instance)
+        return json.dumps(
+            {"connected": is_connected, "instance": name, "endpoint": endpoint},
+            indent=2,
+        )
+
+    except Exception as e:
+        logger.error("graylog_test_connection failed: %s", e)
+        name = instance or (_client.default_name if _client else "unknown")
+        return json.dumps(
+            {"connected": False, "instance": name, "error": str(e)},
+            indent=2,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Convenience tools
+# ---------------------------------------------------------------------------
+
+
+@mcp_server.tool()
+def graylog_get_error_logs(
+    time_range: str = "1h",
+    limit: int = 100,
+    instance: str | None = None,
+) -> str:
+    """Get error logs from the last specified time range.
+
+    Retrieves all error-level logs (ERROR, CRITICAL, FATAL).
+
+    Args:
+        time_range: Time range to search (default: "1h").
+        limit: Maximum number of results (1-1000, default: 100).
+        instance: Target Graylog instance name, or None for the default.
+    """
+    try:
+        if limit < 1 or limit > 1000:
+            return json.dumps(
+                {"error": "Limit must be between 1 and 1000"}, indent=2
+            )
+
+        params = QueryParams(
+            query="level:ERROR OR level:CRITICAL OR level:FATAL",
+            time_range=time_range,
+            limit=limit,
+            fields=["message", "level", "source", "timestamp"],
+        )
+
+        result = _client.search_logs(params, instance=instance)
+        return json.dumps(result, indent=2)
+
+    except Exception as e:
+        logger.error("graylog_get_error_logs failed: %s", e)
+        return json.dumps({"error": str(e)}, indent=2)
+
+
+@mcp_server.tool()
+def graylog_get_log_count_by_level(
+    time_range: str = "1h", instance: str | None = None
+) -> str:
+    """Get log count aggregated by log level.
+
+    Args:
+        time_range: Time range to analyse (default: "1h").
+        instance: Target Graylog instance name, or None for the default.
+    """
+    try:
+        aggregation = AggregationParams(type="terms", field="level", size=10)
+
+        result = _client.get_log_statistics(
+            query="*",
+            time_range=time_range,
+            aggregation=aggregation,
+            instance=instance,
+        )
+        return json.dumps(result, indent=2)
+
+    except Exception as e:
+        logger.error("graylog_get_log_count_by_level failed: %s", e)
+        return json.dumps({"error": str(e)}, indent=2)
+
+
+# ---------------------------------------------------------------------------
+# Notification tools
+# ---------------------------------------------------------------------------
+
+
+@mcp_server.tool()
+def graylog_get_notifications(instance: str | None = None) -> str:
+    """Get system notifications from Graylog.
+
+    Args:
+        instance: Target Graylog instance name, or None for the default.
+    """
+    try:
+        notifications = _client.get_notifications(instance=instance)
+        return json.dumps(
+            {"items": notifications, "total": len(notifications)}, indent=2
+        )
+
+    except Exception as e:
+        logger.error("graylog_get_notifications failed: %s", e)
+        return json.dumps({"error": str(e)}, indent=2)
+
+
+@mcp_server.tool()
+def graylog_dismiss_notification(
+    notification_type: str, instance: str | None = None
+) -> str:
+    """Dismiss a system notification.
+
+    Args:
+        notification_type: The notification type to dismiss.
+        instance: Target Graylog instance name, or None for the default.
+    """
+    try:
+        _client.dismiss_notification(
+            notification_type, instance=instance
+        )
+        return json.dumps(
+            {"dismissed": True, "notification_type": notification_type}, indent=2
+        )
+
+    except Exception as e:
+        logger.error("graylog_dismiss_notification failed: %s", e)
+        return json.dumps({"error": str(e)}, indent=2)
+
+
+# ---------------------------------------------------------------------------
+# Sidecar tools
+# ---------------------------------------------------------------------------
+
+
+@mcp_server.tool()
+def graylog_list_sidecars(instance: str | None = None) -> str:
+    """List all registered Graylog sidecars.
+
+    Args:
+        instance: Target Graylog instance name, or None for the default.
+    """
+    try:
+        sidecars = _client.list_sidecars(instance=instance)
+        return json.dumps(
+            {"items": sidecars, "total": len(sidecars)}, indent=2
+        )
+
+    except Exception as e:
+        logger.error("graylog_list_sidecars failed: %s", e)
+        return json.dumps({"error": str(e)}, indent=2)
+
+
+@mcp_server.tool()
+def graylog_get_sidecar(
+    sidecar_id: str, instance: str | None = None
+) -> str:
+    """Get details of a specific Graylog sidecar.
+
+    Args:
+        sidecar_id: The sidecar node ID.
+        instance: Target Graylog instance name, or None for the default.
+    """
+    try:
+        result = _client.get_sidecar(sidecar_id, instance=instance)
+        return json.dumps(result, indent=2)
+
+    except Exception as e:
+        logger.error("graylog_get_sidecar failed: %s", e)
+        return json.dumps({"error": str(e)}, indent=2)
+
+
+@mcp_server.tool()
+def graylog_update_sidecar_tags(
+    sidecar_id: str,
+    tags: list[str],
+    instance: str | None = None,
+) -> str:
+    """Update tags on a Graylog sidecar.
+
+    Args:
+        sidecar_id: The sidecar node ID.
+        tags: List of tag strings to set.
+        instance: Target Graylog instance name, or None for the default.
+    """
+    try:
+        result = _client.update_sidecar_tags(
+            sidecar_id, tags, instance=instance
+        )
+        return json.dumps(result, indent=2)
+
+    except Exception as e:
+        logger.error("graylog_update_sidecar_tags failed: %s", e)
+        return json.dumps({"error": str(e)}, indent=2)
+
+
+@mcp_server.tool()
+def graylog_assign_sidecar_configurations(
+    nodes: list[dict[str, Any]],
+    instance: str | None = None,
+) -> str:
+    """Assign configurations to sidecar nodes.
+
+    Args:
+        nodes: List of node assignment dicts (node_id + config).
+        instance: Target Graylog instance name, or None for the default.
+    """
+    try:
+        result = _client.assign_sidecar_configurations(
+            nodes, instance=instance
+        )
+        return json.dumps(result, indent=2)
+
+    except Exception as e:
+        logger.error("graylog_assign_sidecar_configurations failed: %s", e)
+        return json.dumps({"error": str(e)}, indent=2)
+
+
+@mcp_server.tool()
+def graylog_list_sidecar_configurations(
+    instance: str | None = None,
+) -> str:
+    """List all sidecar configurations.
+
+    Args:
+        instance: Target Graylog instance name, or None for the default.
+    """
+    try:
+        configs = _client.list_sidecar_configurations(instance=instance)
+        return json.dumps(
+            {"items": configs, "total": len(configs)}, indent=2
+        )
+
+    except Exception as e:
+        logger.error("graylog_list_sidecar_configurations failed: %s", e)
+        return json.dumps({"error": str(e)}, indent=2)
+
+
+@mcp_server.tool()
+def graylog_get_sidecar_configuration(
+    configuration_id: str, instance: str | None = None
+) -> str:
+    """Get a specific sidecar configuration.
+
+    Args:
+        configuration_id: The configuration ID.
+        instance: Target Graylog instance name, or None for the default.
+    """
+    try:
+        result = _client.get_sidecar_configuration(
+            configuration_id, instance=instance
+        )
+        return json.dumps(result, indent=2)
+
+    except Exception as e:
+        logger.error("graylog_get_sidecar_configuration failed: %s", e)
+        return json.dumps({"error": str(e)}, indent=2)
+
+
+@mcp_server.tool()
+def graylog_list_collectors(instance: str | None = None) -> str:
+    """List all sidecar collectors.
+
+    Args:
+        instance: Target Graylog instance name, or None for the default.
+    """
+    try:
+        collectors = _client.list_collectors(instance=instance)
+        return json.dumps(
+            {"items": collectors, "total": len(collectors)}, indent=2
+        )
+
+    except Exception as e:
+        logger.error("graylog_list_collectors failed: %s", e)
+        return json.dumps({"error": str(e)}, indent=2)
+
+
+@mcp_server.tool()
+def graylog_sidecar_action(
+    sidecar_id: str,
+    action: str,
+    collector_id: str,
+    instance: str | None = None,
+) -> str:
+    """Perform an action on a sidecar collector (e.g., restart, stop).
+
+    Args:
+        sidecar_id: The sidecar node ID.
+        action: Action to perform (e.g., "restart", "stop").
+        collector_id: The collector to act on.
+        instance: Target Graylog instance name, or None for the default.
+    """
+    try:
+        result = _client.sidecar_action(
+            sidecar_id, action, collector_id, instance=instance
+        )
+        return json.dumps(result, indent=2)
+
+    except Exception as e:
+        logger.error("graylog_sidecar_action failed: %s", e)
+        return json.dumps({"error": str(e)}, indent=2)
+
+
+@mcp_server.tool()
+def graylog_sidecars_administration(instance: str | None = None) -> str:
+    """Get sidecar administration overview.
+
+    Args:
+        instance: Target Graylog instance name, or None for the default.
+    """
+    try:
+        result = _client.get_sidecars_administration(instance=instance)
+        return json.dumps(result, indent=2)
+
+    except Exception as e:
+        logger.error("graylog_sidecars_administration failed: %s", e)
+        return json.dumps({"error": str(e)}, indent=2)
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
 
 
 def main() -> None:
     """Entry point for the MCP server."""
+    global _client
+
     import argparse
 
     parser = argparse.ArgumentParser(description="Graylog MCP Server")
     parser.add_argument(
-        "--transport", choices=["stdio", "sse"], default="stdio",
+        "--transport",
+        choices=["stdio", "sse"],
+        default="stdio",
     )
     parser.add_argument(
-        "--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        "--log-level",
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
     )
     parser.add_argument(
         "--read-only",
@@ -788,19 +898,25 @@ def main() -> None:
         stream=sys.stderr,
     )
 
-    if not config.has_auth():
+    # Load instances
+    instances = settings.load_instances()
+    if not instances:
         logger.error(
-            "No authentication configured. Set GRAYLOG_TOKEN or "
+            "No Graylog instances configured. Set GRAYLOG_TOKEN or "
             "GRAYLOG_USERNAME/GRAYLOG_PASSWORD env vars, "
-            f"or create {config.graylog.__class__.__name__} at ~/.config/graylog/credentials.json"
+            "or create ~/.config/graylog/credentials.json"
         )
         sys.exit(1)
 
-    logger.info(f"Graylog endpoint: {config.graylog.endpoint}")
-    logger.info(f"Auth method: {'token' if config.graylog.token else 'username/password'}")
+    default_name = settings.get_default_name()
+    _client = GraylogClient(instances, default_name)
+
+    for name, inst in instances.items():
+        marker = " (default)" if name == default_name else ""
+        logger.info("Graylog instance '%s'%s: %s", name, marker, inst.endpoint)
 
     # Read-only mode: remove write tools
-    read_only = args.read_only if args.read_only is not None else config.graylog.read_only
+    read_only = args.read_only if args.read_only is not None else settings.graylog_read_only
     if read_only and WRITE_TOOLS:
         for name in WRITE_TOOLS:
             mcp_server.remove_tool(name)
