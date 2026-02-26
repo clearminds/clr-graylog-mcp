@@ -23,20 +23,22 @@ def parse_time_range(time_range: str) -> dict[str, str | datetime]:
     now = datetime.utcnow()
 
     # Parse relative time ranges
-    if time_range.endswith("h"):
-        hours = int(time_range[:-1])
-        from_time = now - timedelta(hours=hours)
-    elif time_range.endswith("d"):
-        days = int(time_range[:-1])
-        from_time = now - timedelta(days=days)
-    elif time_range.endswith("w"):
-        weeks = int(time_range[:-1])
-        from_time = now - timedelta(weeks=weeks)
-    elif time_range.endswith("m"):
-        minutes = int(time_range[:-1])
-        from_time = now - timedelta(minutes=minutes)
-    else:
-        # Assume absolute time range or return empty
+    try:
+        if time_range.endswith("h"):
+            hours = int(time_range[:-1])
+            from_time = now - timedelta(hours=hours)
+        elif time_range.endswith("d"):
+            days = int(time_range[:-1])
+            from_time = now - timedelta(days=days)
+        elif time_range.endswith("w"):
+            weeks = int(time_range[:-1])
+            from_time = now - timedelta(weeks=weeks)
+        elif time_range.endswith("m"):
+            minutes = int(time_range[:-1])
+            from_time = now - timedelta(minutes=minutes)
+        else:
+            return {}
+    except ValueError:
         return {}
 
     return {"from": from_time, "to": now}
