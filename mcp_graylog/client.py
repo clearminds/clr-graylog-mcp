@@ -1,33 +1,22 @@
-"""Graylog API client for MCP server."""
+"""Graylog API client for MCP server.
+
+Supports multiple Graylog instances with lazy session creation and a
+default-instance fallback.
+"""
 
 from __future__ import annotations
 
-import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any
 from urllib.parse import urljoin
 
 import requests
 from pydantic import BaseModel, Field
 
-from .config import config
+from .config import GraylogInstance
 
 logger = logging.getLogger(__name__)
-
-
-class TimeRange(BaseModel):
-    """Time range for log queries.
-
-    Attributes:
-        type: Time range type (relative, absolute).
-        from_: Start time (aliased as "from" in serialization).
-        to: End time.
-    """
-
-    type: str = Field(..., description="Time range type (relative, absolute)")
-    from_: str | None = Field(None, alias="from", description="Start time")
-    to: str | None = Field(None, description="End time")
 
 
 class QueryParams(BaseModel):
@@ -86,32 +75,89 @@ class AggregationParams(BaseModel):
 
 
 class GraylogClient:
-    """Client for interacting with the Graylog REST API.
+    """Client for interacting with one or more Graylog REST APIs.
 
-    Handles authentication, request construction, and response parsing for
-    all supported Graylog API endpoints including search, streams, and system info.
+    Manages multiple named Graylog instances, lazily creating one
+    ``requests.Session`` per instance with the correct auth headers.
+
+    Args:
+        instances: Mapping of instance name to ``GraylogInstance``.
+        default_name: Name of the instance to use when none is specified.
 
     Attributes:
-        base_url: The base URL of the Graylog server (without trailing slash).
-        session: Pre-configured requests session with auth and content headers.
-        timeout: Request timeout in seconds.
+        instances: The instance registry.
+        default_name: Name of the default instance.
     """
 
-    def __init__(self) -> None:
-        self.base_url = config.graylog.endpoint.rstrip("/")
-        self.session = requests.Session()
+    def __init__(
+        self,
+        instances: dict[str, GraylogInstance],
+        default_name: str,
+    ) -> None:
+        self.instances = instances
+        self.default_name = default_name
+        self._sessions: dict[str, requests.Session] = {}
 
-        # Set up authentication headers
-        auth_headers = config.auth_headers
-        logger.debug(f"Setting up authentication headers: {list(auth_headers.keys())}")
+    # ------------------------------------------------------------------
+    # Instance helpers
+    # ------------------------------------------------------------------
 
-        self.session.headers.update(auth_headers)
-        self.session.headers.update(
-            {"Content-Type": "application/json", "Accept": "application/json"}
-        )
+    def _resolve(
+        self, instance: str | None = None
+    ) -> tuple[requests.Session, str]:
+        """Return ``(session, base_url)`` for the named (or default) instance.
 
-        self.session.verify = config.graylog.verify_ssl
-        self.timeout = config.graylog.timeout
+        Sessions are created lazily on first access and cached for reuse.
+
+        Args:
+            instance: Instance name, or ``None`` to use the default.
+
+        Returns:
+            Tuple of the pre-configured ``requests.Session`` and the
+            base URL for the resolved instance.
+
+        Raises:
+            ValueError: If the requested instance name is not registered.
+        """
+        name = instance or self.default_name
+        if name not in self.instances:
+            available = ", ".join(sorted(self.instances))
+            raise ValueError(
+                f"Unknown Graylog instance '{name}'. Available: {available}"
+            )
+        if name not in self._sessions:
+            inst = self.instances[name]
+            session = requests.Session()
+            session.headers.update(inst.auth_headers)
+            session.headers.update(
+                {
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "X-Requested-By": "XMLHttpRequest",
+                }
+            )
+            session.verify = inst.verify_ssl
+            self._sessions[name] = session
+        return self._sessions[name], self.instances[name].endpoint
+
+    def list_instances(self) -> list[dict[str, str]]:
+        """List all registered Graylog instances.
+
+        Returns:
+            List of dicts with ``name``, ``endpoint``, and ``default`` keys.
+        """
+        return [
+            {
+                "name": n,
+                "endpoint": i.endpoint,
+                "default": n == self.default_name,
+            }
+            for n, i in self.instances.items()
+        ]
+
+    # ------------------------------------------------------------------
+    # HTTP plumbing
+    # ------------------------------------------------------------------
 
     def _make_request(
         self,
@@ -119,69 +165,86 @@ class GraylogClient:
         endpoint: str,
         params: dict[str, Any] | None = None,
         data: dict[str, Any] | None = None,
+        instance: str | None = None,
     ) -> dict[str, Any]:
-        """Make an HTTP request to the Graylog API.
+        """Make an HTTP request to a Graylog API.
 
         Args:
             method: HTTP method (GET, POST, PUT, DELETE).
-            endpoint: API endpoint path (e.g., "/api/streams").
+            endpoint: API endpoint path (e.g., ``/api/streams``).
             params: Query parameters to include in the request URL.
             data: JSON body data to send with the request.
+            instance: Target instance name, or ``None`` for the default.
 
         Returns:
-            Parsed JSON response as a dictionary.
+            Parsed JSON response as a dictionary. Returns ``{}`` for
+            204 No Content or empty responses.
 
         Raises:
-            requests.exceptions.HTTPError: If the server returns an error status.
+            requests.exceptions.HTTPError: If the server returns an error.
             requests.exceptions.RequestException: If the request fails.
         """
-        url = urljoin(self.base_url, endpoint)
+        session, base_url = self._resolve(instance)
+        url = urljoin(base_url, endpoint)
+        timeout = self.instances[instance or self.default_name].timeout
 
         try:
-            logger.debug(f"Making {method} request to {url}")
-            logger.debug(f"Headers: {dict(self.session.headers)}")
+            logger.debug("Making %s request to %s", method, url)
             if data:
-                logger.debug(f"Request data: {data}")
+                logger.debug("Request data: %s", data)
             if params:
-                logger.debug(f"Request params: {params}")
+                logger.debug("Request params: %s", params)
 
-            response = self.session.request(
-                method=method, url=url, params=params, json=data, timeout=self.timeout
+            response = session.request(
+                method=method,
+                url=url,
+                params=params,
+                json=data,
+                timeout=timeout,
             )
 
-            logger.debug(f"Response status: {response.status_code}")
-            logger.debug(f"Response headers: {dict(response.headers)}")
+            logger.debug("Response status: %s", response.status_code)
 
             # Handle authentication errors specifically
             if response.status_code == 401:
                 logger.error("Authentication failed - check your token or username/password")
-                logger.error(f"Response text: {response.text}")
                 raise requests.exceptions.HTTPError(
                     f"Authentication failed (401): {response.text}"
                 )
 
             response.raise_for_status()
+
+            # Handle 204 No Content and empty bodies
+            if response.status_code == 204 or not response.text:
+                return {}
+
             return response.json()
         except requests.exceptions.RequestException as e:
-            logger.error(f"Graylog API request failed: {e}")
+            logger.error("Graylog API request failed: %s", e)
             if hasattr(e, "response") and e.response is not None:
-                logger.error(f"Response status: {e.response.status_code}")
-                logger.error(f"Response text: {e.response.text}")
+                logger.error("Response status: %s", e.response.status_code)
+                logger.error("Response text: %s", e.response.text)
             raise
 
-    def _parse_time_range(self, time_range: str) -> dict[str, Any]:
+    # ------------------------------------------------------------------
+    # Time-range parsing
+    # ------------------------------------------------------------------
+
+    def _parse_time_range(self, time_range: str | None) -> dict[str, Any]:
         """Parse a time range string into Graylog API format.
 
-        Graylog API expects relative time ranges in seconds for the /relative
-        endpoint.  For absolute time ranges, it expects ISO 8601 format.
+        Graylog API expects relative time ranges in seconds for the
+        ``/relative`` endpoint.  For absolute time ranges, it expects
+        ISO 8601 format.
 
         Args:
-            time_range: Relative time string (e.g., "1h", "7d") or ISO 8601 timestamp.
+            time_range: Relative time string (e.g., ``"1h"``, ``"7d"``) or
+                ISO 8601 timestamp. ``None`` or empty string returns ``{}``.
 
         Returns:
-            Dictionary with a "range" key containing seconds (int) for relative
+            Dictionary with a ``"range"`` key containing seconds for relative
             ranges, or the original string for absolute/unrecognized formats.
-            Returns an empty dict when the input is falsy.
+            Returns ``{}`` when the input is falsy.
         """
         if not time_range:
             return {}
@@ -192,80 +255,63 @@ class GraylogClient:
         value = time_range[:-1]
 
         if unit in units and value.isdigit():
-            # Convert to seconds for Graylog API
             seconds = int(value) * units[unit]
             return {"range": seconds}
 
-        # If not a recognized relative range, assume it's an absolute time range
-        # Graylog expects ISO 8601 format for absolute ranges
+        # Try ISO 8601 format
         try:
-            # Try to parse as ISO 8601 format
             datetime.fromisoformat(time_range.replace("Z", "+00:00"))
             return {"range": time_range}
         except ValueError:
-            # If not ISO format, return as-is (Graylog will handle the error)
-            logger.warning(f"Unrecognized time range format: {time_range}")
+            logger.warning("Unrecognized time range format: %s", time_range)
             return {"range": time_range}
 
-    def search_logs(self, params: QueryParams) -> dict[str, Any]:
+    # ------------------------------------------------------------------
+    # Search
+    # ------------------------------------------------------------------
+
+    def search_logs(
+        self,
+        params: QueryParams,
+        instance: str | None = None,
+    ) -> dict[str, Any]:
+        """Search logs using the Graylog universal relative search API.
+
+        Args:
+            params: Query parameters including query string, time range,
+                fields, limits, and sort options.
+            instance: Target instance name, or ``None`` for the default.
+
+        Returns:
+            Dictionary containing ``messages``, ``total_results``,
+            ``fields``, ``time``, and ``query`` keys.
+
+        Raises:
+            ValueError: If the query string is empty.
         """
-        Search logs using Graylog API.
-
-        PURPOSE: Execute log search queries against Graylog with flexible filtering, sorting, and pagination options.
-
-        INPUT FORMAT: QueryParams object with the following structure:
-        {
-            "query": "level:ERROR AND source:nginx",  // REQUIRED: Elasticsearch query syntax
-            "time_range": "1h",                       // OPTIONAL: Time range (1h, 24h, 7d, etc.)
-            "fields": ["message", "level", "source"], // OPTIONAL: Specific fields to return
-            "limit": 50,                              // OPTIONAL: Max results (default: 50)
-            "offset": 0,                              // OPTIONAL: Pagination offset (default: 0)
-            "sort": "timestamp",                      // OPTIONAL: Sort field
-            "sort_direction": "desc",                 // OPTIONAL: Sort direction (asc/desc)
-            "stream_id": "stream_123",                // OPTIONAL: Filter by specific stream
-            "decorate": true,                         // OPTIONAL: Decorate messages (default: true)
-            "filter": "additional_filter",            // OPTIONAL: Additional filter query
-            "highlight": false                        // OPTIONAL: Enable result highlighting
-        }
-
-        GRAYLOG API ENDPOINT: /api/search/universal/relative (GET)
-
-        OUTPUT: Dictionary containing search results with:
-        - messages: Array of log messages with content and metadata
-        - total_results: Total number of matching logs
-        - fields: Available fields in the results
-        - time: Query execution time information
-        - query: The executed query string
-        """
-        # Validate required parameters
         if not params.query:
             raise ValueError("Query parameter is required")
 
-        search_params = {
+        search_params: dict[str, Any] = {
             "query": params.query,
             "limit": params.limit,
             "offset": params.offset,
         }
 
-        # Add sort parameter if specified
         if params.sort:
             search_params["sort"] = f"{params.sort}:{params.sort_direction}"
 
-        # Add time range - default to 1h if not specified
         time_range = params.time_range or "1h"
         time_range_parsed = self._parse_time_range(time_range)
         if time_range_parsed:
             search_params.update(time_range_parsed)
 
-        # Add fields filter - Graylog expects comma-separated string
         if params.fields:
             search_params["fields"] = ",".join(params.fields)
 
-        # Add stream filter - Graylog expects list of stream IDs
         if params.stream_id:
             search_params["streams"] = [params.stream_id]
 
-        # Add advanced Graylog parameters if set
         if params.decorate is not None:
             search_params["decorate"] = params.decorate
         if params.filter is not None:
@@ -273,277 +319,385 @@ class GraylogClient:
         if params.highlight is not None:
             search_params["highlight"] = params.highlight
 
-        # Remove None values
         search_params = {k: v for k, v in search_params.items() if v is not None}
 
-        logger.debug(f"Search params: {search_params}")
-
-        # Use GET and query parameters for this endpoint
         return self._make_request(
-            "GET", "/api/search/universal/relative", params=search_params
+            "GET",
+            "/api/search/universal/relative",
+            params=search_params,
+            instance=instance,
         )
 
     def get_log_statistics(
-        self, query: str, time_range: str, aggregation: AggregationParams
+        self,
+        query: str,
+        time_range: str,
+        aggregation: AggregationParams,
+        instance: str | None = None,
     ) -> dict[str, Any]:
+        """Get log statistics and aggregations.
+
+        Args:
+            query: Search query to filter logs before aggregation.
+            time_range: Time range for analysis (e.g., ``"1h"``, ``"7d"``).
+            aggregation: Aggregation parameters (type, field, size, interval).
+            instance: Target instance name, or ``None`` for the default.
+
+        Returns:
+            Aggregation results from Graylog.
+
+        Raises:
+            ValueError: If query or aggregation field is empty, or the time
+                range is invalid.
         """
-        Get log statistics and aggregations.
-
-        PURPOSE: Analyze log data using various aggregation types to extract insights like top sources, error counts, time-based trends, and statistical summaries.
-
-        INPUT FORMAT:
-        - query: REQUIRED - Search query to filter logs before aggregation
-        - time_range: REQUIRED - Time range for analysis (e.g., "1h", "24h", "7d")
-        - aggregation: AggregationParams object with:
-          {
-            "type": "terms",           // REQUIRED: Aggregation type
-            "field": "source",         // REQUIRED: Field to aggregate on
-            "size": 10,                // OPTIONAL: Number of buckets (default: 10)
-            "interval": "1h"           // OPTIONAL: Time interval for date_histogram
-          }
-
-        AGGREGATION TYPES SUPPORTED:
-        - "terms": Count occurrences by field values (e.g., top sources, levels)
-        - "date_histogram": Time-based grouping (requires interval parameter)
-        - "cardinality": Count unique values in a field
-        - "stats": Statistical summary (min, max, avg, sum)
-        - "min", "max", "avg", "sum": Single statistical value
-
-        GRAYLOG API ENDPOINT: /api/search/universal/relative/{aggregation_type} (POST)
-
-        OUTPUT: Dictionary containing aggregation results with:
-        - aggregation: Aggregation results with buckets and counts
-        - query: The executed query string
-        - time: Query execution time information
-        - total_results: Total number of logs analyzed
-        """
-        # Validate required parameters
         if not query:
             raise ValueError("Query parameter is required")
         if not aggregation.field:
             raise ValueError("Aggregation field is required")
 
-        # Parse time range
         time_range_parsed = self._parse_time_range(time_range)
         if not time_range_parsed:
             raise ValueError("Valid time range is required")
 
-        # Build request body according to Graylog API specification
-        request_body = {
+        request_body: dict[str, Any] = {
             "query": query,
             "range": time_range_parsed["range"],
             "field": aggregation.field,
             "size": aggregation.size,
         }
 
-        # Add interval for date histograms
         if aggregation.interval:
             request_body["interval"] = aggregation.interval
 
-        # Remove None values
         request_body = {k: v for k, v in request_body.items() if v is not None}
 
-        logger.debug(f"Aggregation request body: {request_body}")
-
         endpoint = f"/api/search/universal/relative/{aggregation.type}"
-        return self._make_request("POST", endpoint, data=request_body)
+        return self._make_request("POST", endpoint, data=request_body, instance=instance)
 
-    def list_streams(self) -> list[dict[str, Any]]:
+    # ------------------------------------------------------------------
+    # Streams
+    # ------------------------------------------------------------------
+
+    def list_streams(self, instance: str | None = None) -> list[dict[str, Any]]:
+        """List all available streams.
+
+        Args:
+            instance: Target instance name, or ``None`` for the default.
+
+        Returns:
+            List of stream dictionaries.
         """
-        List all available streams.
-
-        PURPOSE: Retrieve a complete list of all log streams configured in Graylog with their metadata and configuration details.
-
-        INPUT: No parameters required.
-
-        GRAYLOG API ENDPOINT: /api/streams (GET)
-
-        OUTPUT: List of dictionaries containing stream information:
-        [
-            {
-                "id": "stream_id_123",
-                "title": "nginx_access_logs",
-                "description": "Nginx access logs from web servers",
-                "disabled": false,
-                "rules": [...],
-                "created_at": "2024-01-01T00:00:00.000Z",
-                "updated_at": "2024-01-01T00:00:00.000Z",
-                "creator_user_id": "user_123",
-                "outputs": [...],
-                "stream_rules": [...]
-            }
-        ]
-        """
-        response = self._make_request("GET", "/api/streams")
+        response = self._make_request("GET", "/api/streams", instance=instance)
         return response.get("streams", [])
 
-    def get_stream_info(self, stream_id: str) -> dict[str, Any]:
-        """
-        Get detailed information about a stream.
+    def get_stream_info(
+        self,
+        stream_id: str,
+        instance: str | None = None,
+    ) -> dict[str, Any]:
+        """Get detailed information about a stream.
 
-        PURPOSE: Retrieve comprehensive details about a single stream including configuration, rules, outputs, and status information.
+        Args:
+            stream_id: The unique identifier of the stream.
+            instance: Target instance name, or ``None`` for the default.
 
-        INPUT:
-        - stream_id: REQUIRED - The unique identifier of the stream (e.g., "5abb3f2f7bb9fd00011595fe")
+        Returns:
+            Dictionary with stream details.
 
-        GRAYLOG API ENDPOINT: /api/streams/{stream_id} (GET)
-
-        OUTPUT: Dictionary containing detailed stream information:
-        {
-            "id": "stream_id_123",
-            "title": "nginx_access_logs",
-            "description": "Nginx access logs from web servers",
-            "disabled": false,
-            "rules": [...],
-            "outputs": [...],
-            "stream_rules": [...],
-            "created_at": "2024-01-01T00:00:00.000Z",
-            "updated_at": "2024-01-01T00:00:00.000Z",
-            "creator_user_id": "user_123",
-            "matching_messages": 1500,
-            "remove_matches_from_default_stream": false
-        }
+        Raises:
+            ValueError: If stream_id is empty.
         """
         if not stream_id:
             raise ValueError("Stream ID is required")
-        return self._make_request("GET", f"/api/streams/{stream_id}")
+        return self._make_request("GET", f"/api/streams/{stream_id}", instance=instance)
 
-    def search_stream_logs(self, stream_id: str, params: QueryParams) -> dict[str, Any]:
+    def search_stream_logs(
+        self,
+        stream_id: str,
+        params: QueryParams,
+        instance: str | None = None,
+    ) -> dict[str, Any]:
+        """Search logs within a specific stream.
+
+        Args:
+            stream_id: The stream to search in.
+            params: Query parameters for the search.
+            instance: Target instance name, or ``None`` for the default.
+
+        Returns:
+            Dictionary containing search results from the stream.
+
+        Raises:
+            ValueError: If stream_id is empty.
         """
-        Search logs within a specific stream.
-
-        PURPOSE: Execute log search queries that are restricted to a specific stream, useful for analyzing logs from particular applications or services.
-
-        INPUT FORMAT:
-        - stream_id: REQUIRED - The ID of the stream to search in (e.g., "5abb3f2f7bb9fd00011595fe")
-        - params: QueryParams object with search parameters (same as search_logs)
-
-        BEHAVIOR:
-        - Automatically filters results to the specified stream
-        - Uses the same search capabilities as search_logs but scoped to one stream
-        - If query is empty, defaults to "*" (all logs in stream)
-        - Limits results to maximum of 100 logs per request
-
-        GRAYLOG API ENDPOINT: /api/search/universal/relative (GET) with stream filter
-
-        OUTPUT: Dictionary containing search results from the specified stream:
-        {
-            "messages": [...],
-            "total_results": 150,
-            "fields": [...],
-            "time": {...},
-            "query": "level:ERROR"
-        }
-        """
-        # Validate stream_id
         if not stream_id:
             raise ValueError("Stream ID is required")
 
-        # Ensure stream_id is set in params
         params.stream_id = stream_id
 
-        # Validate query - if empty or None, use wildcard
         if not params.query or params.query.strip() == "":
             params.query = "*"
 
-        # Ensure limit is within reasonable bounds
         if params.limit < 1:
             params.limit = 1
         elif params.limit > 100:
             params.limit = 100
 
-        logger.debug(f"Searching stream {stream_id} with query: {params.query}")
-        return self.search_logs(params)
+        return self.search_logs(params, instance=instance)
 
-    def get_system_info(self) -> dict[str, Any]:
+    # ------------------------------------------------------------------
+    # System
+    # ------------------------------------------------------------------
+
+    def get_system_info(self, instance: str | None = None) -> dict[str, Any]:
+        """Get Graylog system information.
+
+        Args:
+            instance: Target instance name, or ``None`` for the default.
+
+        Returns:
+            Dictionary with system info (version, hostname, cluster, etc.).
         """
-        Get Graylog system information.
+        return self._make_request("GET", "/api/system", instance=instance)
 
-        PURPOSE: Retrieve comprehensive system information about the Graylog instance including version, status, configuration, and resource usage.
+    def test_connection(self, instance: str | None = None) -> bool:
+        """Test connection to a Graylog instance.
 
-        INPUT: No parameters required.
+        Args:
+            instance: Target instance name, or ``None`` for the default.
 
-        GRAYLOG API ENDPOINT: /api/system (GET)
-
-        OUTPUT: Dictionary containing system information:
-        {
-            "version": "5.2.0",
-            "hostname": "graylog-server",
-            "tagline": "Manage your logs in the dark and have multi-line JSON logs without tears.",
-            "cluster_id": "cluster_123",
-            "node_id": "node_123",
-            "lifecycle": "running",
-            "lb_status": "alive",
-            "timezone": "UTC",
-            "startup_time": "2024-01-01T00:00:00.000Z",
-            "jvm": {...},
-            "system": {...},
-            "input": {...},
-            "output": {...},
-            "indices": {...}
-        }
-        """
-        return self._make_request("GET", "/api/system")
-
-    def test_connection(self) -> bool:
-        """
-        Test connection to Graylog server.
-
-        PURPOSE: Verify connectivity and authentication to the Graylog server, useful for health checks and troubleshooting.
-
-        INPUT: No parameters required.
-
-        TEST PROCESS:
-        1. Tests basic connectivity to the Graylog server
-        2. Verifies authentication credentials
-        3. Attempts to access system information endpoint
-
-        OUTPUT: Boolean indicating connection status:
-        - True: Successfully connected and authenticated
-        - False: Connection failed (network, authentication, or server issues)
-
-        ERROR HANDLING:
-        - 401 errors: Authentication failure (check username/password)
-        - Connection errors: Network connectivity issues
-        - Other errors: Server availability or configuration issues
+        Returns:
+            ``True`` if the connection and authentication succeed.
         """
         try:
-            # First test basic connectivity
-            response = self.session.get(self.base_url, timeout=self.timeout)
-            logger.debug(f"Basic connectivity test: {response.status_code}")
+            session, base_url = self._resolve(instance)
+            timeout = self.instances[instance or self.default_name].timeout
 
-            # Then test API authentication
-            self.get_system_info()
+            response = session.get(base_url, timeout=timeout)
+            logger.debug("Basic connectivity test: %s", response.status_code)
+
+            self.get_system_info(instance=instance)
             logger.info("Graylog connection successful")
             return True
         except requests.exceptions.HTTPError as e:
             if "401" in str(e):
                 logger.error("Authentication failed - check your username and password")
-                logger.error(
-                    f"   Authorization header: {self.session.headers.get('Authorization', 'None')[:20]}..."
-                )
             else:
-                logger.error(f"HTTP error during connection test: {e}")
+                logger.error("HTTP error during connection test: %s", e)
             return False
         except requests.exceptions.ConnectionError as e:
-            # Handle connection errors more gracefully for mock endpoints
-            if (
-                "mock-graylog-server" in self.base_url
-                or "graylog-server" in self.base_url
-            ):
-                logger.debug(f"Mock Graylog server not available: {e}")
-                return False
-            else:
-                logger.error(f"Connection test failed: {e}")
-                return False
+            logger.error("Connection test failed: %s", e)
+            return False
         except Exception as e:
-            # Handle other errors more gracefully for mock endpoints
-            if (
-                "mock-graylog-server" in self.base_url
-                or "graylog-server" in self.base_url
-            ):
-                logger.debug(f"Mock Graylog server not available: {e}")
-                return False
-            else:
-                logger.error(f"Connection test failed: {e}")
-                return False
+            logger.error("Connection test failed: %s", e)
+            return False
+
+    # ------------------------------------------------------------------
+    # Notifications
+    # ------------------------------------------------------------------
+
+    def get_notifications(
+        self, instance: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Get system notifications.
+
+        Args:
+            instance: Target instance name, or ``None`` for the default.
+
+        Returns:
+            List of notification dictionaries.
+        """
+        response = self._make_request(
+            "GET", "/api/system/notifications", instance=instance
+        )
+        return response.get("notifications", [])
+
+    def dismiss_notification(
+        self,
+        notification_type: str,
+        instance: str | None = None,
+    ) -> dict[str, Any]:
+        """Dismiss a system notification.
+
+        Args:
+            notification_type: The notification type to dismiss.
+            instance: Target instance name, or ``None`` for the default.
+
+        Returns:
+            Empty dict on success (HTTP 204).
+        """
+        return self._make_request(
+            "DELETE",
+            f"/api/system/notifications/{notification_type}",
+            instance=instance,
+        )
+
+    # ------------------------------------------------------------------
+    # Sidecars
+    # ------------------------------------------------------------------
+
+    def list_sidecars(
+        self, instance: str | None = None
+    ) -> list[dict[str, Any]]:
+        """List all registered sidecars.
+
+        Args:
+            instance: Target instance name, or ``None`` for the default.
+
+        Returns:
+            List of sidecar dictionaries.
+        """
+        response = self._make_request("GET", "/api/sidecars", instance=instance)
+        return response.get("sidecars", [])
+
+    def get_sidecar(
+        self,
+        sidecar_id: str,
+        instance: str | None = None,
+    ) -> dict[str, Any]:
+        """Get details of a specific sidecar.
+
+        Args:
+            sidecar_id: The sidecar node ID.
+            instance: Target instance name, or ``None`` for the default.
+
+        Returns:
+            Dictionary with sidecar details.
+        """
+        return self._make_request(
+            "GET", f"/api/sidecars/{sidecar_id}", instance=instance
+        )
+
+    def update_sidecar_tags(
+        self,
+        sidecar_id: str,
+        tags: list[str],
+        instance: str | None = None,
+    ) -> dict[str, Any]:
+        """Update tags on a sidecar.
+
+        Args:
+            sidecar_id: The sidecar node ID.
+            tags: List of tag strings to set.
+            instance: Target instance name, or ``None`` for the default.
+
+        Returns:
+            Response from the API.
+        """
+        return self._make_request(
+            "PUT",
+            f"/api/sidecars/{sidecar_id}/tags",
+            data={"tags": tags},
+            instance=instance,
+        )
+
+    def assign_sidecar_configurations(
+        self,
+        nodes: list[dict[str, Any]],
+        instance: str | None = None,
+    ) -> dict[str, Any]:
+        """Assign configurations to sidecar nodes.
+
+        Args:
+            nodes: List of node assignment dicts (node_id + config).
+            instance: Target instance name, or ``None`` for the default.
+
+        Returns:
+            Response from the API.
+        """
+        return self._make_request(
+            "PUT",
+            "/api/sidecars/configurations",
+            data={"nodes": nodes},
+            instance=instance,
+        )
+
+    def list_sidecar_configurations(
+        self, instance: str | None = None
+    ) -> list[dict[str, Any]]:
+        """List all sidecar configurations.
+
+        Args:
+            instance: Target instance name, or ``None`` for the default.
+
+        Returns:
+            List of configuration dictionaries.
+        """
+        response = self._make_request(
+            "GET", "/api/sidecar/configurations", instance=instance
+        )
+        return response.get("configurations", [])
+
+    def get_sidecar_configuration(
+        self,
+        config_id: str,
+        instance: str | None = None,
+    ) -> dict[str, Any]:
+        """Get a specific sidecar configuration.
+
+        Args:
+            config_id: The configuration ID.
+            instance: Target instance name, or ``None`` for the default.
+
+        Returns:
+            Dictionary with configuration details.
+        """
+        return self._make_request(
+            "GET", f"/api/sidecar/configurations/{config_id}", instance=instance
+        )
+
+    def list_collectors(
+        self, instance: str | None = None
+    ) -> list[dict[str, Any]]:
+        """List all sidecar collectors.
+
+        Args:
+            instance: Target instance name, or ``None`` for the default.
+
+        Returns:
+            List of collector dictionaries.
+        """
+        response = self._make_request(
+            "GET", "/api/sidecar/collectors", instance=instance
+        )
+        return response.get("collectors", [])
+
+    def sidecar_action(
+        self,
+        sidecar_id: str,
+        action: str,
+        collector_id: str,
+        instance: str | None = None,
+    ) -> dict[str, Any]:
+        """Perform an action on a sidecar collector.
+
+        Args:
+            sidecar_id: The sidecar node ID.
+            action: Action to perform (e.g., ``"restart"``).
+            collector_id: The collector to act on.
+            instance: Target instance name, or ``None`` for the default.
+
+        Returns:
+            Response from the API.
+        """
+        return self._make_request(
+            "PUT",
+            f"/api/sidecars/{sidecar_id}/action",
+            data={"action": action, "collector_id": collector_id},
+            instance=instance,
+        )
+
+    def get_sidecars_administration(
+        self, instance: str | None = None
+    ) -> dict[str, Any]:
+        """Get sidecar administration overview.
+
+        Args:
+            instance: Target instance name, or ``None`` for the default.
+
+        Returns:
+            Dictionary with sidecars admin data and pagination.
+        """
+        return self._make_request(
+            "GET", "/api/sidecars/administration", instance=instance
+        )
