@@ -863,6 +863,27 @@ def graylog_sidecars_administration(instance: str | None = None) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Composite init
+# ---------------------------------------------------------------------------
+
+
+def init_composite() -> FastMCP:
+    """Initialize for composite mounting. Returns the FastMCP instance."""
+    global _client
+
+    instances = settings.load_instances()
+    default_name = settings.get_default_name()
+
+    _client = GraylogClient(instances, default_name)
+
+    if settings.graylog_read_only and WRITE_TOOLS:
+        for name in WRITE_TOOLS:
+            mcp_server.remove_tool(name)
+
+    return mcp_server
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
