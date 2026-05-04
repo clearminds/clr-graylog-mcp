@@ -28,7 +28,7 @@ mcp_server.add_middleware(ToolValidationMiddleware())
 # Imported here (not at the top) on purpose: annotations.py needs ``mcp_server`` from
 # this module, so importing it before the ``mcp_server = FastMCP(...)`` line above
 # would be a circular import. Do not move.
-from mcp_graylog.annotations import read_tool, write_tool  # noqa: E402
+from mcp_graylog.annotations import read_tool, remove_non_read_tools, write_tool  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -38,14 +38,6 @@ logger = logging.getLogger(__name__)
 
 settings = Settings()
 _client: GraylogClient | None = None
-
-# Tools removed in read-only mode.
-WRITE_TOOLS: list[str] = [
-    "graylog_dismiss_notification",
-    "graylog_update_sidecar_tags",
-    "graylog_assign_sidecar_configurations",
-    "graylog_sidecar_action",
-]
 
 # ---------------------------------------------------------------------------
 # Pydantic request models
@@ -922,10 +914,9 @@ def main() -> None:
 
     # Read-only mode: remove write tools
     read_only = args.read_only if args.read_only is not None else settings.graylog_read_only
-    if read_only and WRITE_TOOLS:
-        for name in WRITE_TOOLS:
-            mcp_server.remove_tool(name)
-        logger.info("Read-only mode: %d write tools removed", len(WRITE_TOOLS))
+    if read_only:
+        removed = remove_non_read_tools(mcp_server)
+        logger.info("Read-only mode: %d non-read tools removed", removed)
 
     mcp_server.run(transport=args.transport)
 
