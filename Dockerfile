@@ -1,34 +1,24 @@
-FROM python:3.11-slim
+# syntax=docker/dockerfile:1
+FROM python:3.13-slim AS builder
 
-# Set working directory
-WORKDIR /app
+WORKDIR /build
 
-# Copy requirements first for better caching
-COPY requirements.txt ./
+RUN pip install --no-cache-dir uv
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
 
-# Copy application code
-COPY mcp_graylog/ ./mcp_graylog/
+RUN uv pip install --system --no-cache-dir .
 
-# Copy entrypoint script
-COPY entrypoint.sh ./entrypoint.sh
+# --- Runtime stage ---
+FROM python:3.13-slim
 
-# Make entrypoint script executable
-RUN chmod +x ./entrypoint.sh
+RUN useradd -r -m -d /home/mcp mcp
 
-# Create non-root user
-RUN useradd --create-home --shell /bin/bash app \
-    && chown -R app:app /app
-USER app
+COPY --from=builder /usr/local/lib/python3.13/site-packages /usr/local/lib/python3.13/site-packages
+COPY --from=builder /usr/local/bin/clr-graylog-mcp /usr/local/bin/clr-graylog-mcp
 
-# Expose port
+USER mcp
 EXPOSE 8000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import requests; requests.get('http://localhost:8000/health_check', timeout=5)" || exit 1
-
-# Set entrypoint
-ENTRYPOINT ["./entrypoint.sh"] 
+ENTRYPOINT ["clr-graylog-mcp"]
+CMD ["--transport", "http", "--host", "0.0.0.0", "--port", "8000"]
