@@ -894,8 +894,17 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Graylog MCP Server")
     parser.add_argument(
         "--transport",
-        choices=["stdio", "sse"],
+        choices=["stdio", "http"],
         default="stdio",
+        help="Transport type (stdio or http).",
+    )
+    parser.add_argument(
+        "--host", type=str, default="127.0.0.1",
+        help="HTTP host (only used with --transport http).",
+    )
+    parser.add_argument(
+        "--port", type=int, default=8000,
+        help="HTTP port (only used with --transport http).",
     )
     parser.add_argument(
         "--log-level",
@@ -939,7 +948,10 @@ def main() -> None:
         removed = remove_non_read_tools(mcp_server)
         logger.info("Read-only mode: %d non-read tools removed", removed)
 
-    mcp_server.run(transport=args.transport)
+    if args.transport == "http":
+        mcp_server.run(transport="http", host=args.host, port=args.port)
+    else:
+        mcp_server.run(transport=args.transport)
 
 
 if __name__ == "__main__":
