@@ -25,6 +25,11 @@ from .middleware import ToolValidationMiddleware
 mcp_server = FastMCP("graylog")
 mcp_server.add_middleware(ToolValidationMiddleware())
 
+# Imported here (not at the top) on purpose: annotations.py needs ``mcp_server`` from
+# this module, so importing it before the ``mcp_server = FastMCP(...)`` line above
+# would be a circular import. Do not move.
+from mcp_graylog.annotations import read_tool, remove_non_read_tools, write_tool  # noqa: E402
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -33,14 +38,6 @@ logger = logging.getLogger(__name__)
 
 settings = Settings()
 _client: GraylogClient | None = None
-
-# Tools removed in read-only mode.
-WRITE_TOOLS: list[str] = [
-    "graylog_dismiss_notification",
-    "graylog_update_sidecar_tags",
-    "graylog_assign_sidecar_configurations",
-    "graylog_sidecar_action",
-]
 
 # ---------------------------------------------------------------------------
 # Pydantic request models
@@ -293,7 +290,7 @@ class StreamSearchRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-@mcp_server.tool()
+@read_tool
 def graylog_instances() -> str:
     """List all configured Graylog instances.
 
@@ -308,7 +305,7 @@ def graylog_instances() -> str:
 # ---------------------------------------------------------------------------
 
 
-@mcp_server.tool()
+@read_tool
 def graylog_search_logs(request: SearchLogsRequest, instance: str | None = None) -> str:
     """Search logs in Graylog using Elasticsearch query syntax.
 
@@ -337,7 +334,7 @@ def graylog_search_logs(request: SearchLogsRequest, instance: str | None = None)
         return json.dumps({"error": str(e)}, indent=2)
 
 
-@mcp_server.tool()
+@read_tool
 def graylog_get_log_statistics(
     request: AggregationRequest, instance: str | None = None
 ) -> str:
@@ -374,7 +371,7 @@ def graylog_get_log_statistics(
 # ---------------------------------------------------------------------------
 
 
-@mcp_server.tool()
+@read_tool
 def graylog_list_streams(instance: str | None = None) -> str:
     """List all available Graylog streams.
 
@@ -392,7 +389,7 @@ def graylog_list_streams(instance: str | None = None) -> str:
         return json.dumps({"error": str(e)}, indent=2)
 
 
-@mcp_server.tool()
+@read_tool
 def graylog_get_stream_info(
     stream_id: str, instance: str | None = None
 ) -> str:
@@ -411,7 +408,7 @@ def graylog_get_stream_info(
         return json.dumps({"error": str(e)}, indent=2)
 
 
-@mcp_server.tool()
+@read_tool
 def graylog_search_stream_logs(
     request: StreamSearchRequest, instance: str | None = None
 ) -> str:
@@ -441,7 +438,7 @@ def graylog_search_stream_logs(
         return json.dumps({"error": str(e)}, indent=2)
 
 
-@mcp_server.tool()
+@read_tool
 def graylog_search_streams_by_name(
     stream_name: str, instance: str | None = None
 ) -> str:
@@ -485,7 +482,7 @@ def graylog_search_streams_by_name(
         return json.dumps({"error": str(e)}, indent=2)
 
 
-@mcp_server.tool()
+@read_tool
 def graylog_get_last_event_from_stream(
     stream_id: str,
     time_range: str = "1h",
@@ -518,7 +515,7 @@ def graylog_get_last_event_from_stream(
 # ---------------------------------------------------------------------------
 
 
-@mcp_server.tool()
+@read_tool
 def graylog_get_system_info(instance: str | None = None) -> str:
     """Get Graylog system information and status.
 
@@ -534,7 +531,7 @@ def graylog_get_system_info(instance: str | None = None) -> str:
         return json.dumps({"error": str(e)}, indent=2)
 
 
-@mcp_server.tool()
+@read_tool
 def graylog_test_connection(instance: str | None = None) -> str:
     """Test connection to a Graylog server.
 
@@ -565,7 +562,7 @@ def graylog_test_connection(instance: str | None = None) -> str:
 # ---------------------------------------------------------------------------
 
 
-@mcp_server.tool()
+@read_tool
 def graylog_get_error_logs(
     time_range: str = "1h",
     limit: int = 100,
@@ -601,7 +598,7 @@ def graylog_get_error_logs(
         return json.dumps({"error": str(e)}, indent=2)
 
 
-@mcp_server.tool()
+@read_tool
 def graylog_get_log_count_by_level(
     time_range: str = "1h", instance: str | None = None
 ) -> str:
@@ -632,7 +629,7 @@ def graylog_get_log_count_by_level(
 # ---------------------------------------------------------------------------
 
 
-@mcp_server.tool()
+@read_tool
 def graylog_get_notifications(instance: str | None = None) -> str:
     """Get system notifications from Graylog.
 
@@ -650,7 +647,7 @@ def graylog_get_notifications(instance: str | None = None) -> str:
         return json.dumps({"error": str(e)}, indent=2)
 
 
-@mcp_server.tool()
+@write_tool
 def graylog_dismiss_notification(
     notification_type: str, instance: str | None = None
 ) -> str:
@@ -678,7 +675,7 @@ def graylog_dismiss_notification(
 # ---------------------------------------------------------------------------
 
 
-@mcp_server.tool()
+@read_tool
 def graylog_list_sidecars(instance: str | None = None) -> str:
     """List all registered Graylog sidecars.
 
@@ -696,7 +693,7 @@ def graylog_list_sidecars(instance: str | None = None) -> str:
         return json.dumps({"error": str(e)}, indent=2)
 
 
-@mcp_server.tool()
+@read_tool
 def graylog_get_sidecar(
     sidecar_id: str, instance: str | None = None
 ) -> str:
@@ -715,7 +712,7 @@ def graylog_get_sidecar(
         return json.dumps({"error": str(e)}, indent=2)
 
 
-@mcp_server.tool()
+@write_tool
 def graylog_update_sidecar_tags(
     sidecar_id: str,
     tags: list[str],
@@ -739,7 +736,7 @@ def graylog_update_sidecar_tags(
         return json.dumps({"error": str(e)}, indent=2)
 
 
-@mcp_server.tool()
+@write_tool
 def graylog_assign_sidecar_configurations(
     nodes: list[dict[str, Any]],
     instance: str | None = None,
@@ -761,7 +758,7 @@ def graylog_assign_sidecar_configurations(
         return json.dumps({"error": str(e)}, indent=2)
 
 
-@mcp_server.tool()
+@read_tool
 def graylog_list_sidecar_configurations(
     instance: str | None = None,
 ) -> str:
@@ -781,7 +778,7 @@ def graylog_list_sidecar_configurations(
         return json.dumps({"error": str(e)}, indent=2)
 
 
-@mcp_server.tool()
+@read_tool
 def graylog_get_sidecar_configuration(
     configuration_id: str, instance: str | None = None
 ) -> str:
@@ -802,7 +799,7 @@ def graylog_get_sidecar_configuration(
         return json.dumps({"error": str(e)}, indent=2)
 
 
-@mcp_server.tool()
+@read_tool
 def graylog_list_collectors(instance: str | None = None) -> str:
     """List all sidecar collectors.
 
@@ -820,7 +817,7 @@ def graylog_list_collectors(instance: str | None = None) -> str:
         return json.dumps({"error": str(e)}, indent=2)
 
 
-@mcp_server.tool()
+@write_tool
 def graylog_sidecar_action(
     sidecar_id: str,
     action: str,
@@ -846,7 +843,7 @@ def graylog_sidecar_action(
         return json.dumps({"error": str(e)}, indent=2)
 
 
-@mcp_server.tool()
+@read_tool
 def graylog_sidecars_administration(instance: str | None = None) -> str:
     """Get sidecar administration overview.
 
@@ -938,10 +935,9 @@ def main() -> None:
 
     # Read-only mode: remove write tools
     read_only = args.read_only if args.read_only is not None else settings.graylog_read_only
-    if read_only and WRITE_TOOLS:
-        for name in WRITE_TOOLS:
-            mcp_server.remove_tool(name)
-        logger.info("Read-only mode: %d write tools removed", len(WRITE_TOOLS))
+    if read_only:
+        removed = remove_non_read_tools(mcp_server)
+        logger.info("Read-only mode: %d non-read tools removed", removed)
 
     mcp_server.run(transport=args.transport)
 
