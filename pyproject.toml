@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "clr-graylog-mcp"
-version = "1.0.0"
+version = "2.0.0"
 description = "MCP server for Graylog log search and analysis"
 authors = [{name = "Clearminds", email = "noc@clearminds.se"}]
 readme = "README.md"

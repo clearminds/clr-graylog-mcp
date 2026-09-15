@@ -291,7 +291,7 @@ class StreamSearchRequest(BaseModel):
 
 
 @read_tool
-def graylog_instances() -> str:
+def instances() -> str:
     """List all configured Graylog instances.
 
     Returns name, endpoint, and default flag for each instance.
@@ -306,7 +306,7 @@ def graylog_instances() -> str:
 
 
 @read_tool
-def graylog_search_logs(request: SearchLogsRequest, instance: str | None = None) -> str:
+def search_logs(request: SearchLogsRequest, instance: str | None = None) -> str:
     """Search logs in Graylog using Elasticsearch query syntax.
 
     Args:
@@ -330,12 +330,12 @@ def graylog_search_logs(request: SearchLogsRequest, instance: str | None = None)
         return json.dumps(result, indent=2)
 
     except Exception as e:
-        logger.error("graylog_search_logs failed: %s", e)
+        logger.error("search_logs failed: %s", e)
         return json.dumps({"error": str(e)}, indent=2)
 
 
 @read_tool
-def graylog_get_log_statistics(
+def get_log_statistics(
     request: AggregationRequest, instance: str | None = None
 ) -> str:
     """Get log statistics and aggregations from Graylog.
@@ -362,7 +362,7 @@ def graylog_get_log_statistics(
         return json.dumps(result, indent=2)
 
     except Exception as e:
-        logger.error("graylog_get_log_statistics failed: %s", e)
+        logger.error("get_log_statistics failed: %s", e)
         return json.dumps({"error": str(e)}, indent=2)
 
 
@@ -372,7 +372,7 @@ def graylog_get_log_statistics(
 
 
 @read_tool
-def graylog_list_streams(instance: str | None = None) -> str:
+def list_streams(instance: str | None = None) -> str:
     """List all available Graylog streams.
 
     Args:
@@ -385,12 +385,12 @@ def graylog_list_streams(instance: str | None = None) -> str:
         )
 
     except Exception as e:
-        logger.error("graylog_list_streams failed: %s", e)
+        logger.error("list_streams failed: %s", e)
         return json.dumps({"error": str(e)}, indent=2)
 
 
 @read_tool
-def graylog_get_stream_info(
+def get_stream_info(
     stream_id: str, instance: str | None = None
 ) -> str:
     """Get detailed information about a specific Graylog stream.
@@ -404,12 +404,12 @@ def graylog_get_stream_info(
         return json.dumps(stream_info, indent=2)
 
     except Exception as e:
-        logger.error("graylog_get_stream_info failed: %s", e)
+        logger.error("get_stream_info failed: %s", e)
         return json.dumps({"error": str(e)}, indent=2)
 
 
 @read_tool
-def graylog_search_stream_logs(
+def search_stream_logs(
     request: StreamSearchRequest, instance: str | None = None
 ) -> str:
     """Search logs within a specific Graylog stream.
@@ -434,12 +434,12 @@ def graylog_search_stream_logs(
         return json.dumps(result, indent=2)
 
     except Exception as e:
-        logger.error("graylog_search_stream_logs failed: %s", e)
+        logger.error("search_stream_logs failed: %s", e)
         return json.dumps({"error": str(e)}, indent=2)
 
 
 @read_tool
-def graylog_search_streams_by_name(
+def search_streams_by_name(
     stream_name: str, instance: str | None = None
 ) -> str:
     """Search for Graylog streams by name or partial name.
@@ -478,12 +478,12 @@ def graylog_search_streams_by_name(
         )
 
     except Exception as e:
-        logger.error("graylog_search_streams_by_name failed: %s", e)
+        logger.error("search_streams_by_name failed: %s", e)
         return json.dumps({"error": str(e)}, indent=2)
 
 
 @read_tool
-def graylog_get_last_event_from_stream(
+def get_last_event_from_stream(
     stream_id: str,
     time_range: str = "1h",
     instance: str | None = None,
@@ -506,7 +506,7 @@ def graylog_get_last_event_from_stream(
         return json.dumps(result, indent=2)
 
     except Exception as e:
-        logger.error("graylog_get_last_event_from_stream failed: %s", e)
+        logger.error("get_last_event_from_stream failed: %s", e)
         return json.dumps({"error": str(e)}, indent=2)
 
 
@@ -516,7 +516,7 @@ def graylog_get_last_event_from_stream(
 
 
 @read_tool
-def graylog_get_system_info(instance: str | None = None) -> str:
+def get_system_info(instance: str | None = None) -> str:
     """Get Graylog system information and status.
 
     Args:
@@ -527,12 +527,12 @@ def graylog_get_system_info(instance: str | None = None) -> str:
         return json.dumps(system_info, indent=2)
 
     except Exception as e:
-        logger.error("graylog_get_system_info failed: %s", e)
+        logger.error("get_system_info failed: %s", e)
         return json.dumps({"error": str(e)}, indent=2)
 
 
 @read_tool
-def graylog_test_connection(instance: str | None = None) -> str:
+def test_connection(instance: str | None = None) -> str:
     """Test connection to a Graylog server.
 
     Args:
@@ -549,7 +549,7 @@ def graylog_test_connection(instance: str | None = None) -> str:
         )
 
     except Exception as e:
-        logger.error("graylog_test_connection failed: %s", e)
+        logger.error("test_connection failed: %s", e)
         name = instance or (_client.default_name if _client else "unknown")
         return json.dumps(
             {"connected": False, "instance": name, "error": str(e)},
@@ -563,7 +563,7 @@ def graylog_test_connection(instance: str | None = None) -> str:
 
 
 @read_tool
-def graylog_get_error_logs(
+def get_error_logs(
     time_range: str = "1h",
     limit: int = 100,
     instance: str | None = None,
@@ -594,12 +594,12 @@ def graylog_get_error_logs(
         return json.dumps(result, indent=2)
 
     except Exception as e:
-        logger.error("graylog_get_error_logs failed: %s", e)
+        logger.error("get_error_logs failed: %s", e)
         return json.dumps({"error": str(e)}, indent=2)
 
 
 @read_tool
-def graylog_get_log_count_by_level(
+def get_log_count_by_level(
     time_range: str = "1h", instance: str | None = None
 ) -> str:
     """Get log count aggregated by log level.
@@ -620,7 +620,7 @@ def graylog_get_log_count_by_level(
         return json.dumps(result, indent=2)
 
     except Exception as e:
-        logger.error("graylog_get_log_count_by_level failed: %s", e)
+        logger.error("get_log_count_by_level failed: %s", e)
         return json.dumps({"error": str(e)}, indent=2)
 
 
@@ -630,7 +630,7 @@ def graylog_get_log_count_by_level(
 
 
 @read_tool
-def graylog_get_notifications(instance: str | None = None) -> str:
+def get_notifications(instance: str | None = None) -> str:
     """Get system notifications from Graylog.
 
     Args:
@@ -643,12 +643,12 @@ def graylog_get_notifications(instance: str | None = None) -> str:
         )
 
     except Exception as e:
-        logger.error("graylog_get_notifications failed: %s", e)
+        logger.error("get_notifications failed: %s", e)
         return json.dumps({"error": str(e)}, indent=2)
 
 
 @write_tool
-def graylog_dismiss_notification(
+def dismiss_notification(
     notification_type: str, instance: str | None = None
 ) -> str:
     """Dismiss a system notification.
@@ -666,7 +666,7 @@ def graylog_dismiss_notification(
         )
 
     except Exception as e:
-        logger.error("graylog_dismiss_notification failed: %s", e)
+        logger.error("dismiss_notification failed: %s", e)
         return json.dumps({"error": str(e)}, indent=2)
 
 
@@ -676,7 +676,7 @@ def graylog_dismiss_notification(
 
 
 @read_tool
-def graylog_list_sidecars(instance: str | None = None) -> str:
+def list_sidecars(instance: str | None = None) -> str:
     """List all registered Graylog sidecars.
 
     Args:
@@ -689,12 +689,12 @@ def graylog_list_sidecars(instance: str | None = None) -> str:
         )
 
     except Exception as e:
-        logger.error("graylog_list_sidecars failed: %s", e)
+        logger.error("list_sidecars failed: %s", e)
         return json.dumps({"error": str(e)}, indent=2)
 
 
 @read_tool
-def graylog_get_sidecar(
+def get_sidecar(
     sidecar_id: str, instance: str | None = None
 ) -> str:
     """Get details of a specific Graylog sidecar.
@@ -708,12 +708,12 @@ def graylog_get_sidecar(
         return json.dumps(result, indent=2)
 
     except Exception as e:
-        logger.error("graylog_get_sidecar failed: %s", e)
+        logger.error("get_sidecar failed: %s", e)
         return json.dumps({"error": str(e)}, indent=2)
 
 
 @write_tool
-def graylog_update_sidecar_tags(
+def update_sidecar_tags(
     sidecar_id: str,
     tags: list[str],
     instance: str | None = None,
@@ -732,12 +732,12 @@ def graylog_update_sidecar_tags(
         return json.dumps(result, indent=2)
 
     except Exception as e:
-        logger.error("graylog_update_sidecar_tags failed: %s", e)
+        logger.error("update_sidecar_tags failed: %s", e)
         return json.dumps({"error": str(e)}, indent=2)
 
 
 @write_tool
-def graylog_assign_sidecar_configurations(
+def assign_sidecar_configurations(
     nodes: list[dict[str, Any]],
     instance: str | None = None,
 ) -> str:
@@ -754,12 +754,12 @@ def graylog_assign_sidecar_configurations(
         return json.dumps(result, indent=2)
 
     except Exception as e:
-        logger.error("graylog_assign_sidecar_configurations failed: %s", e)
+        logger.error("assign_sidecar_configurations failed: %s", e)
         return json.dumps({"error": str(e)}, indent=2)
 
 
 @read_tool
-def graylog_list_sidecar_configurations(
+def list_sidecar_configurations(
     instance: str | None = None,
 ) -> str:
     """List all sidecar configurations.
@@ -774,12 +774,12 @@ def graylog_list_sidecar_configurations(
         )
 
     except Exception as e:
-        logger.error("graylog_list_sidecar_configurations failed: %s", e)
+        logger.error("list_sidecar_configurations failed: %s", e)
         return json.dumps({"error": str(e)}, indent=2)
 
 
 @read_tool
-def graylog_get_sidecar_configuration(
+def get_sidecar_configuration(
     configuration_id: str, instance: str | None = None
 ) -> str:
     """Get a specific sidecar configuration.
@@ -795,12 +795,12 @@ def graylog_get_sidecar_configuration(
         return json.dumps(result, indent=2)
 
     except Exception as e:
-        logger.error("graylog_get_sidecar_configuration failed: %s", e)
+        logger.error("get_sidecar_configuration failed: %s", e)
         return json.dumps({"error": str(e)}, indent=2)
 
 
 @read_tool
-def graylog_list_collectors(instance: str | None = None) -> str:
+def list_collectors(instance: str | None = None) -> str:
     """List all sidecar collectors.
 
     Args:
@@ -813,12 +813,12 @@ def graylog_list_collectors(instance: str | None = None) -> str:
         )
 
     except Exception as e:
-        logger.error("graylog_list_collectors failed: %s", e)
+        logger.error("list_collectors failed: %s", e)
         return json.dumps({"error": str(e)}, indent=2)
 
 
 @write_tool
-def graylog_sidecar_action(
+def sidecar_action(
     sidecar_id: str,
     action: str,
     collector_id: str,
@@ -839,12 +839,12 @@ def graylog_sidecar_action(
         return json.dumps(result, indent=2)
 
     except Exception as e:
-        logger.error("graylog_sidecar_action failed: %s", e)
+        logger.error("sidecar_action failed: %s", e)
         return json.dumps({"error": str(e)}, indent=2)
 
 
 @read_tool
-def graylog_sidecars_administration(instance: str | None = None) -> str:
+def sidecars_administration(instance: str | None = None) -> str:
     """Get sidecar administration overview.
 
     Args:
@@ -855,7 +855,7 @@ def graylog_sidecars_administration(instance: str | None = None) -> str:
         return json.dumps(result, indent=2)
 
     except Exception as e:
-        logger.error("graylog_sidecars_administration failed: %s", e)
+        logger.error("sidecars_administration failed: %s", e)
         return json.dumps({"error": str(e)}, indent=2)
 
 
